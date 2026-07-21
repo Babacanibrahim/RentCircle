@@ -27,12 +27,10 @@ const BookingsDashboard = () => {
   };
 
   useEffect(() => {
-    // 🎯 DÜZELTME: Hem local hem session kontrol edilecek
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
     if (token) {
       try {
         const payload = JSON.parse(window.atob(token.split(".")[1]));
-        // 🎯 DÜZELTME: ID'yi küçük harfli string'e çeviriyoruz
         setCurrentUserId(String(payload.user_id).toLowerCase());
       } catch (e) {
         console.error("Token çözümlenemedi");
@@ -52,11 +50,16 @@ const BookingsDashboard = () => {
     }
   };
 
-  const handleCancel = async (id) => {
-    if (!window.confirm("Bu işlemi iptal etmek istediğinize emin misiniz?")) return;
+  // 🎯 YENİ: 24 SAAT CEZA UYARILI İPTAL FONKSİYONU
+  const handleCancel = async (id, isApproved) => {
+    const warningMsg = isApproved
+      ? "⚠️ DİKKAT: Bu işlem onaylanmış bir kiralama! Eğer başlangıç tarihine 24 saatten az kaldıysa ceza (bakiye kesintisi veya ilan yasaklaması) uygulanabilir. Yine de iptal etmek istiyor musunuz?"
+      : "Bu işlemi iptal etmek istediğinize emin misiniz?";
+
+    if (!window.confirm(warningMsg)) return;
     try {
       await itemApi.cancelBooking(id);
-      alert("İşlem iptal edildi.");
+      alert("İşlem başarıyla iptal edildi.");
       fetchBookings();
     } catch (error) {
       alert(error.response?.data?.error || "Hata oluştu.");
@@ -136,7 +139,6 @@ const BookingsDashboard = () => {
 
   if (loading) return <div className="w-full relative flex justify-center pt-20 text-slate-500">Yükleniyor...</div>;
 
-  // 🎯 DÜZELTME: Filtreleme kısmında tüm ID'leri String'e ve küçük harfe çevirerek kesin eşleşme sağlıyoruz.
   const filteredBookings = bookings.filter((b) => {
     if (!currentUserId) return false;
 
@@ -202,9 +204,13 @@ const BookingsDashboard = () => {
                       ✅ Talebi Onayla
                     </button>
                   )}
-                  {booking.status === "pending_approval" && (
-                    <button onClick={() => handleCancel(booking.id)} className="btn-slate !text-rose-400 p-2 text-xs hover:bg-rose-500/10">
-                      ❌ İptal Et
+
+                  {/* 🎯 YENİ: İptal Et Butonu Hem Alıcı Hem Satıcı İçin Onay Beklerken ve Onaylandıktan Sonra Gözükür */}
+                  {["pending_approval", "approved"].includes(booking.status) && (
+                    <button
+                      onClick={() => handleCancel(booking.id, booking.status === "approved")}
+                      className="btn-slate !text-rose-400 p-2 text-xs hover:bg-rose-500/10 w-full mt-2 border-rose-500/20">
+                      ❌ İşlemi İptal Et
                     </button>
                   )}
 

@@ -8,14 +8,12 @@ const WalletDashboard = () => {
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Form State'leri
   const [depositAmount, setDepositAmount] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [iban, setIban] = useState("TR"); // IBAN varsayılan olarak TR ile başlasın
+  const [iban, setIban] = useState("TR");
 
   useEffect(() => {
     fetchWallet();
-
     const status = searchParams.get("status");
     if (status === "success") {
       alert("✅ Ödeme başarılı! Bakiyeniz cüzdanınıza eklendi.");
@@ -35,7 +33,6 @@ const WalletDashboard = () => {
     }
   };
 
-  // PARA YÜKLEME
   const handleDeposit = async (e) => {
     e.preventDefault();
     if (!depositAmount || depositAmount <= 0) return alert("Geçerli bir tutar girin.");
@@ -53,11 +50,8 @@ const WalletDashboard = () => {
     }
   };
 
-  // 🎯 YENİ: IBAN FORMATLAYICI
   const handleIbanChange = (e) => {
     let rawValue = e.target.value.toUpperCase();
-
-    // Sadece TR ve rakamlara izin ver
     if (!rawValue.startsWith("TR")) {
       rawValue = "TR" + rawValue.replace(/[^0-9]/g, "");
     } else {
@@ -65,33 +59,25 @@ const WalletDashboard = () => {
       const numbers = rawValue.slice(2).replace(/[^0-9]/g, "");
       rawValue = prefix + numbers;
     }
-
-    // Maksimum 26 karakter (TR + 24 rakam)
     if (rawValue.length > 26) rawValue = rawValue.slice(0, 26);
-
     setIban(rawValue);
   };
 
-  // 🎯 YENİ: ÇEKİLECEK TUTAR KONTROLÜ
   const handleWithdrawAmountChange = (e) => {
     let val = e.target.value;
     if (val < 0) val = 0;
     setWithdrawAmount(val);
   };
 
-  // PARA ÇEKME
   const handleWithdraw = async (e) => {
     e.preventDefault();
-
     const amountToWithdraw = parseFloat(withdrawAmount);
     const currentBalance = parseFloat(wallet?.balance || 0);
 
-    // Bakiye Kontrolü
     if (amountToWithdraw > currentBalance) {
       return alert("❌ Çekmek istediğiniz tutar mevcut bakiyenizden fazla olamaz.");
     }
 
-    // IBAN Uzunluk Kontrolü
     if (iban.length !== 26) {
       return alert("❌ Lütfen 26 haneli geçerli bir IBAN girin (TR + 24 Rakam).");
     }
@@ -118,7 +104,6 @@ const WalletDashboard = () => {
       <h1 className="text-3xl font-black text-slate-100 mb-8 tracking-tight">Dijital Cüzdanım</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-        {/* Bakiye Kartı */}
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -131,9 +116,7 @@ const WalletDashboard = () => {
           <p className="text-xs text-emerald-400 mt-4">Kullanıma Hazır</p>
         </motion.div>
 
-        {/* İşlem Paneli */}
         <div className="col-span-1 md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Para Yükle */}
           <div className="p-6 rounded-2xl bg-slate-800/50 border border-slate-700 shadow-lg flex flex-col justify-between">
             <div>
               <h3 className="text-slate-200 font-bold mb-4 flex items-center gap-2">💳 Kredi Kartı ile Yükle</h3>
@@ -156,11 +139,9 @@ const WalletDashboard = () => {
             </form>
           </div>
 
-          {/* Para Çek */}
           <div className="p-6 rounded-2xl bg-slate-800/50 border border-slate-700 shadow-lg flex flex-col justify-between">
             <div>
               <h3 className="text-slate-200 font-bold mb-2 flex items-center gap-2">🏦 IBAN'a Para Çek</h3>
-              {/* 🎯 YENİ: Kullanıcıyı uyaran bilgi metni */}
               <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-lg mb-4">
                 <p className="text-[10px] text-amber-400 font-bold">⚠️ ÖNEMLİ GÜVENLİK UYARISI</p>
                 <p className="text-[10px] text-slate-300 mt-1">
@@ -168,7 +149,7 @@ const WalletDashboard = () => {
                   <span className="text-white font-bold">
                     {wallet?.user?.first_name} {wallet?.user?.last_name}
                   </span>
-                  ) kayıtlı vadesiz banka hesaplarına çekim yapabilirsiniz. Başkası adına olan hesaplara gönderim reddedilecektir.
+                  ) kayıtlı vadesiz banka hesaplarına çekim yapabilirsiniz.
                 </p>
               </div>
             </div>
@@ -207,41 +188,50 @@ const WalletDashboard = () => {
         </div>
       </div>
 
-      {/* İşlem Geçmişi (Aynı Kalıyor) */}
-      <h2 className="text-xl font-bold text-slate-200 mb-4">İşlem Geçmişi</h2>
-      <div className="bg-slate-800/40 rounded-2xl border border-slate-700 overflow-hidden">
+      <h2 className="text-xl font-bold text-slate-200 mb-4">İşlem Geçmişi (Hesap Özeti)</h2>
+      <div className="bg-slate-800/40 rounded-2xl border border-slate-700 overflow-x-auto">
         {wallet?.transactions?.length === 0 ? (
           <div className="p-8 text-center text-slate-500 font-mono text-sm">Henüz bir işlem yapmadınız.</div>
         ) : (
-          <table className="w-full text-left text-sm text-slate-300">
+          <table className="w-full text-left text-sm text-slate-300 min-w-[800px]">
             <thead className="bg-slate-900/50 text-xs uppercase font-bold text-slate-500">
               <tr>
-                <th className="px-6 py-4">Tarih</th>
-                <th className="px-6 py-4">İşlem Türü</th>
-                <th className="px-6 py-4">Açıklama</th>
-                <th className="px-6 py-4 text-right">Tutar</th>
+                <th className="px-6 py-4 w-32">Tarih</th>
+                <th className="px-6 py-4 w-40">İşlem Türü</th>
+                <th className="px-6 py-4">Açıklama Detayı</th>
+                <th className="px-6 py-4 text-right w-32">Tutar</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700/50">
               {wallet?.transactions.map((txn) => (
                 <tr key={txn.id} className="hover:bg-slate-800/50 transition-colors">
-                  <td className="px-6 py-4 font-mono">{new Date(txn.created_at).toLocaleDateString("tr-TR")}</td>
+                  <td className="px-6 py-4 font-mono whitespace-nowrap text-xs">{new Date(txn.created_at).toLocaleDateString("tr-TR")}</td>
                   <td className="px-6 py-4">
                     <span
-                      className={`px-2 py-1 rounded text-xs font-bold ${
-                        txn.transaction_type === "DEPOSIT" || txn.transaction_type === "INCOME"
-                          ? "bg-emerald-500/10 text-emerald-400"
-                          : "bg-rose-500/10 text-rose-400"
+                      className={`px-2 py-1 rounded text-[11px] font-bold whitespace-nowrap ${
+                        txn.transaction_type === "DEPOSIT" || txn.transaction_type === "INCOME" || txn.transaction_type === "REFUND"
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                          : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
                       }`}>
                       {txn.transaction_type_display}
                     </span>
                   </td>
-                  <td className="px-6 py-4">{txn.description || "-"}</td>
+                  {/* 🎯 YENİ: Açıklama kısmı artık satır atlayan, okunaklı, destansı bir formatta */}
+                  <td className="px-6 py-4">
+                    <div className="max-w-xs md:max-w-md whitespace-normal leading-relaxed text-[13px] text-slate-300">
+                      {txn.description || "-"}
+                    </div>
+                  </td>
                   <td
-                    className={`px-6 py-4 text-right font-bold font-mono ${
-                      txn.transaction_type === "DEPOSIT" || txn.transaction_type === "INCOME" ? "text-emerald-400" : "text-rose-400"
+                    className={`px-6 py-4 text-right font-bold font-mono whitespace-nowrap ${
+                      txn.transaction_type === "DEPOSIT" || txn.transaction_type === "INCOME" || txn.transaction_type === "REFUND"
+                        ? "text-emerald-400"
+                        : "text-rose-400"
                     }`}>
-                    {txn.transaction_type === "DEPOSIT" || txn.transaction_type === "INCOME" ? "+" : "-"}₺{txn.amount}
+                    {txn.transaction_type === "DEPOSIT" || txn.transaction_type === "INCOME" || txn.transaction_type === "REFUND"
+                      ? "+"
+                      : "-"}
+                    ₺{txn.amount}
                   </td>
                 </tr>
               ))}

@@ -8,7 +8,6 @@ const RentalHistory = () => {
   const [activeTab, setActiveTab] = useState("renter");
   const [currentUserId, setCurrentUserId] = useState(null);
 
-  // Değerlendirme Modalı State'leri
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [rating, setRating] = useState(5);
@@ -27,12 +26,10 @@ const RentalHistory = () => {
   };
 
   useEffect(() => {
-    // 🎯 DÜZELTME: Hem local hem session kontrol edilecek
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
     if (token) {
       try {
         const payload = JSON.parse(window.atob(token.split(".")[1]));
-        // 🎯 DÜZELTME: ID'yi küçük harfli string'e çeviriyoruz
         setCurrentUserId(String(payload.user_id).toLowerCase());
       } catch (e) {
         console.error("Token çözülemadi");
@@ -66,14 +63,18 @@ const RentalHistory = () => {
   const getStatusBadge = (status) => {
     const badges = {
       completed: (
-        <span className="px-3 py-1 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-lg text-xs font-bold">Tamamlandı</span>
+        <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-[11px] font-bold">
+          Tamamlandı / İade Edildi
+        </span>
       ),
       rejected: (
-        <span className="px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-lg text-xs font-bold">İptal Edildi</span>
+        <span className="px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-lg text-[11px] font-bold">
+          İptal Edildi
+        </span>
       ),
       disputed: (
-        <span className="px-3 py-1 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-lg text-xs font-bold">
-          Uyuşmazlık
+        <span className="px-3 py-1 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-lg text-[11px] font-bold">
+          Uyuşmazlık (Sorunlu)
         </span>
       ),
     };
@@ -82,13 +83,10 @@ const RentalHistory = () => {
 
   if (loading) return <div className="w-full relative flex justify-center pt-20 text-slate-500">Yükleniyor...</div>;
 
-  // 🎯 DÜZELTME: Filtreleme kısmında ID'leri kesin eşleştiriyoruz
   const filteredHistory = history.filter((b) => {
     if (!currentUserId) return false;
-
     const renterId = String(b.renter).toLowerCase();
     const ownerId = String(b.item_detail.owner).toLowerCase();
-
     return activeTab === "renter" ? renterId === currentUserId : ownerId === currentUserId;
   });
 
@@ -126,16 +124,28 @@ const RentalHistory = () => {
                   />
                   <div>
                     <h3 className="text-sm font-bold text-slate-100">{booking.item_detail.title}</h3>
-                    <div className="text-xs text-slate-400 mt-1 font-mono">
+                    <div className="text-[11px] text-slate-400 mt-1 font-mono">
                       {booking.start_date} <span className="mx-1">→</span> {booking.end_date}
                     </div>
-                    <div className="mt-2">{getStatusBadge(booking.status)}</div>
+
+                    {/* 🎯 YENİ: İptal Sorumlusu ve Durum Rozetleri */}
+                    <div className="mt-2 flex flex-col items-start gap-1.5">
+                      {getStatusBadge(booking.status)}
+
+                      {booking.status === "rejected" && booking.cancelled_by_name && (
+                        <div className="text-[10px] text-rose-300 font-bold bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20">
+                          🚨 İptal Eden: <span className="text-rose-100">{booking.cancelled_by_name}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 <div className="text-left md:text-center border-l border-r border-slate-700/50 px-6">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Toplam Tutar</span>
-                  <span className="text-lg font-black text-slate-300">₺{booking.total_price}</span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Kira + Güvence</span>
+                  <span className="text-lg font-black text-slate-300">
+                    ₺{(parseFloat(booking.total_price) + parseFloat(booking.deposit_price)).toFixed(2)}
+                  </span>
                 </div>
 
                 <div className="flex flex-col gap-2 min-w-[180px]">

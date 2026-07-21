@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { itemApi } from "../services/itemApi";
 import ItemCard from "../components/ItemCard";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom"; // 🎯 useOutletContext eklendi
 import { motion, AnimatePresence } from "framer-motion";
 
-const ItemDashboard = ({ locationFilter }) => {
+const ItemDashboard = () => {
   const navigate = useNavigate();
+
+  // 🎯 DÜZELTME: Konum verisini MainLayout içindeki Outlet Context'ten güvenle çekiyoruz
+  const { locationFilter } = useOutletContext() || {};
+
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,10 +21,21 @@ const ItemDashboard = ({ locationFilter }) => {
   const [priceMax, setPriceMax] = useState("");
   const [availableOnly, setAvailableOnly] = useState(false);
 
+  // 🎯 Navbar'dan konum (city/district) değiştiğinde bu useEffect tetiklenir ve API'ye yansır
   useEffect(() => {
     const fetchDashboardData = async () => {
+      setLoading(true);
       try {
-        const [itemsData, categoriesData] = await Promise.all([itemApi.getListings(), itemApi.getCategories()]);
+        const filters = {
+          city: locationFilter?.city || "",
+          district: locationFilter?.district || "",
+        };
+
+        const [itemsData, categoriesData] = await Promise.all([
+          itemApi.getListings(filters), // Şehir ve ilçe parametreleri Backend'e iletiliyor
+          itemApi.getCategories(),
+        ]);
+
         setItems(itemsData);
         setCategories(categoriesData);
       } catch (error) {
@@ -30,16 +45,14 @@ const ItemDashboard = ({ locationFilter }) => {
       }
     };
     fetchDashboardData();
-  }, []);
+  }, [locationFilter]);
 
-  // 🎯 TERTEMİZ İLAN VERME AKSİYONU (Sadece giriş kontrolü yapar)
   const handleCreateListingClick = () => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
     if (!token) {
       alert("İlan vermek için lütfen önce giriş yapın.");
       return navigate("/login");
     }
-    // KYC/İyzico kontrolü olmadan direkt ilan sayfasına yönlendir
     navigate("/create-listing");
   };
 
@@ -48,21 +61,6 @@ const ItemDashboard = ({ locationFilter }) => {
   };
 
   const filteredItems = items.filter((item) => {
-    const targetCity = locationFilter?.city ?? "";
-    let matchesCity = true;
-    let matchesDistrict = true;
-
-    if (targetCity !== "") {
-      const dbCity = (item.city || "").toLocaleLowerCase("tr-TR").trim();
-      const filterCity = targetCity.toLocaleLowerCase("tr-TR").trim();
-      matchesCity = dbCity === filterCity;
-
-      const targetDistrict = locationFilter?.district ?? "";
-      const dbDistrict = (item.district || "").toLocaleLowerCase("tr-TR").trim();
-      const filterDistrict = targetDistrict.toLocaleLowerCase("tr-TR").trim();
-      matchesDistrict = targetDistrict === "" || dbDistrict === filterDistrict;
-    }
-
     const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(item.category);
 
     const itemPrice = parseFloat(item.price_per_day) || 0;
@@ -75,12 +73,12 @@ const ItemDashboard = ({ locationFilter }) => {
     const isItemAvailable = item.is_available === true || item.is_available === "true";
     const matchesAvailability = !availableOnly || isItemAvailable;
 
-    return matchesCity && matchesDistrict && matchesCategory && matchesMinPrice && matchesMaxPrice && matchesAvailability;
+    return matchesCategory && matchesMinPrice && matchesMaxPrice && matchesAvailability;
   });
 
   if (loading) {
     return (
-      <div className="w-full relative flex items-center justify-center font-mono text-sm tracking-widest text-slate-400">
+      <div className="w-full relative flex items-center justify-center font-mono text-sm tracking-widest text-slate-400 pt-20">
         <div className="animate-pulse">RENTCIRCLE YÜKLENİYOR...</div>
       </div>
     );

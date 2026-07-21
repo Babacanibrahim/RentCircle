@@ -63,7 +63,6 @@ const Navbar = ({ onLocationFilter }) => {
             if (onLocationFilter) onLocationFilter({ city: "", district: "" });
           });
 
-        // 🎯 ÇÖZÜM: BİLDİRİMLER İÇİN SESSİZ YOKLAMA (POLLING)
         const fetchNotifs = () => {
           itemApi
             .getNotifications()
@@ -71,8 +70,8 @@ const Navbar = ({ onLocationFilter }) => {
             .catch((err) => console.error("Bildirimler çekilemedi:", err));
         };
 
-        fetchNotifs(); // İlk yüklemede çek
-        notifInterval = setInterval(fetchNotifs, 10000); // 10 saniyede bir güncelle
+        fetchNotifs();
+        notifInterval = setInterval(fetchNotifs, 10000);
       } catch (e) {
         console.error("Token çözümlenemedi:", e);
         if (onLocationFilter) onLocationFilter({ city: "", district: "" });
@@ -81,11 +80,10 @@ const Navbar = ({ onLocationFilter }) => {
       if (onLocationFilter) onLocationFilter({ city: "", district: "" });
     }
 
-    // Component kapandığında interval'i temizle
     return () => {
       if (notifInterval) clearInterval(notifInterval);
     };
-  }, []); // onLocationFilter'ı bağımlılıklara eklemedik çünkü sürekli tetiklenmesini istemiyoruz.
+  }, [onLocationFilter]);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
@@ -113,23 +111,31 @@ const Navbar = ({ onLocationFilter }) => {
     }
   };
 
+  // 🎯 YENİ: TÜM BİLDİRİMLERİ TEMİZLE FONKSİYONU
+  const handleClearAllNotifications = async () => {
+    if (window.confirm("Tüm bildirimleri kalıcı olarak silmek istediğinize emin misiniz?")) {
+      try {
+        await itemApi.clearAllNotifications();
+        setNotifications([]); // Ekranda anında sıfırla
+      } catch (err) {
+        console.error("Bildirimler temizlenemedi:", err);
+      }
+    }
+  };
+
   const handleNotificationClick = (notif) => {
     setIsNotificationMenuOpen(false);
-    if (notif.notification_type === "message") {
-      navigate("/chat");
-    } else if (notif.notification_type === "booking") {
-      navigate("/bookings");
-    }
+    if (notif.notification_type === "message") navigate("/chat");
+    else if (notif.notification_type === "booking") navigate("/bookings");
+    else if (notif.notification_type === "wallet") navigate("/wallet");
+    else if (notif.notification_type === "system") navigate("/history");
   };
 
   const handleLogout = async () => {
     try {
-      const refreshToken = localStorage.getItem("refresh_token") || sessionStorage.getItem("refresh_token");
-      if (refreshToken) {
-        // await authApi.logout(refreshToken);
-      }
+      // Backend logout logic
     } catch (error) {
-      console.error("Backend çıkış işlemi sırasında hata:", error);
+      console.error(error);
     } finally {
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
@@ -197,6 +203,20 @@ const Navbar = ({ onLocationFilter }) => {
     if (onLocationFilter) onLocationFilter(newLocation);
   };
 
+  const getNotificationStyle = (type, avatar) => {
+    switch (type) {
+      case "wallet":
+        return { icon: "💸", bg: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" };
+      case "system":
+        return { icon: "⚠️", bg: "bg-rose-500/20 text-rose-400 border-rose-500/30" };
+      case "booking":
+        return { icon: "📦", bg: "bg-amber-500/20 text-amber-400 border-amber-500/30" };
+      case "message":
+      default:
+        return { icon: avatar ? avatar[0].toUpperCase() : "💬", bg: "bg-blue-500/20 text-blue-400 border-blue-500/30" };
+    }
+  };
+
   return (
     <>
       <nav className="sticky top-0 z-40 w-full bg-[#0f172a]/80 backdrop-blur-xl border-b border-[#475569]/50 shadow-md">
@@ -211,22 +231,7 @@ const Navbar = ({ onLocationFilter }) => {
           </div>
 
           <div
-            onClick={() => {
-              const exactCity =
-                Object.keys(formattedTurkeyData).find(
-                  (c) => c.toLocaleLowerCase("tr-TR") === (location.city || "").toLocaleLowerCase("tr-TR"),
-                ) || location.city;
-              setSelectedCity(exactCity);
-              let exactDistrict = location.district;
-              if (exactCity && formattedTurkeyData[exactCity]) {
-                const foundDistrict = formattedTurkeyData[exactCity].districts.find(
-                  (d) => d.toLocaleLowerCase("tr-TR") === (location.district || "").toLocaleLowerCase("tr-TR"),
-                );
-                if (foundDistrict) exactDistrict = foundDistrict;
-              }
-              setSelectedDistrict(exactDistrict);
-              setIsModalOpen(true);
-            }}
+            onClick={() => setIsModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 bg-[#1e293b]/60 border border-[#475569]/60 rounded-xl hover:border-blue-500/40 transition-all duration-300 cursor-pointer max-w-xs sm:max-w-sm w-full shadow-inner group">
             <span className="text-blue-400 text-sm group-hover:animate-bounce">📍</span>
             <div className="flex-1 text-left overflow-hidden cursor-pointer">
@@ -248,7 +253,6 @@ const Navbar = ({ onLocationFilter }) => {
                     onClick={handleBellClick}
                     className="relative flex items-center justify-center w-10 h-10 rounded-full bg-[#1e293b]/80 border border-[#475569]/50 hover:bg-[#334155] transition-colors cursor-pointer group">
                     <span className="text-lg group-hover:rotate-12 transition-transform">🔔</span>
-
                     {unreadCount > 0 && (
                       <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white flex items-center justify-center rounded-full text-[9px] font-black border border-[#0f172a] shadow-sm shadow-red-500/50 animate-pulse">
                         {unreadCount > 9 ? "9+" : unreadCount}
@@ -265,40 +269,55 @@ const Navbar = ({ onLocationFilter }) => {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute right-0 top-14 w-80 cyber-card bg-[#1e293b] shadow-2xl z-50 flex flex-col py-3 border border-[#475569]/60">
-                        <div className="px-4 pb-2 border-b border-[#475569]/40 mb-2">
+                        className="absolute right-0 top-14 w-80 md:w-96 cyber-card bg-[#1e293b] shadow-2xl z-50 flex flex-col py-3 border border-[#475569]/60">
+                        {/* 🎯 BİLDİRİM BAŞLIĞI VE TÜMÜNÜ TEMİZLE BUTONU */}
+                        <div className="px-4 pb-2 border-b border-[#475569]/40 mb-2 flex justify-between items-center">
                           <h3 className="text-xs font-black text-slate-200 uppercase tracking-wider">Bildirimleriniz</h3>
+                          {notifications.length > 0 && (
+                            <button
+                              onClick={handleClearAllNotifications}
+                              className="text-[10px] text-blue-400 hover:text-blue-300 font-bold tracking-wider transition-colors cursor-pointer">
+                              Tümünü Temizle
+                            </button>
+                          )}
                         </div>
 
-                        <div className="max-h-[300px] overflow-y-auto scrollbar-thin">
+                        <div className="max-h-[350px] overflow-y-auto scrollbar-thin">
                           {notifications.length === 0 ? (
-                            <div className="px-4 py-6 text-center text-slate-500">
-                              <span className="text-2xl block mb-2">📭</span>
-                              <p className="text-xs font-mono">Yeni bildiriminiz yok.</p>
+                            <div className="px-4 py-8 text-center text-slate-500">
+                              <span className="text-3xl block mb-2 opacity-50">📭</span>
+                              <p className="text-xs font-mono">Tüm bildirimleri okudunuz.</p>
                             </div>
                           ) : (
-                            notifications.map((notif) => (
-                              <div
-                                key={notif.id}
-                                onClick={() => handleNotificationClick(notif)}
-                                className="p-3 border-b border-slate-700/30 hover:bg-slate-700/30 transition-colors cursor-pointer flex gap-3 items-start group relative">
-                                <div className="w-8 h-8 flex-shrink-0 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold uppercase text-xs">
-                                  {notif.sender_avatar ? notif.sender_avatar[0] : "S"}
+                            notifications.map((notif) => {
+                              const style = getNotificationStyle(notif.notification_type, notif.sender_avatar);
+                              return (
+                                <div
+                                  key={notif.id}
+                                  onClick={() => handleNotificationClick(notif)}
+                                  className="p-3 border-b border-slate-700/30 hover:bg-slate-700/40 transition-colors cursor-pointer flex gap-3 items-start group relative">
+                                  <div
+                                    className={`w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center font-bold uppercase text-sm border ${style.bg}`}>
+                                    {style.icon}
+                                  </div>
+
+                                  <div className="flex-1 pr-6">
+                                    <p className="text-[11.5px] text-slate-300 leading-snug">{notif.message}</p>
+                                    <span className="text-[9px] text-slate-500 font-mono mt-1.5 block">
+                                      {new Date(notif.created_at).toLocaleDateString("tr-TR", { month: "short", day: "numeric" })} •{" "}
+                                      {new Date(notif.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
+                                    </span>
+                                  </div>
+
+                                  <button
+                                    onClick={(e) => handleDeleteNotification(e, notif.id)}
+                                    className="absolute right-3 top-3 text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    title="Sil">
+                                    ✕
+                                  </button>
                                 </div>
-                                <div className="flex-1 pr-6">
-                                  <p className="text-[11px] text-slate-300 leading-tight">{notif.message}</p>
-                                  <span className="text-[9px] text-slate-500 font-mono mt-1 block">
-                                    {new Date(notif.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
-                                  </span>
-                                </div>
-                                <button
-                                  onClick={(e) => handleDeleteNotification(e, notif.id)}
-                                  className="absolute right-3 top-3 text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  title="Bildirimi Sil">
-                                  &times;
-                                </button>
-                              </div>
-                            ))
+                              );
+                            })
                           )}
                         </div>
                       </motion.div>
@@ -331,7 +350,6 @@ const Navbar = ({ onLocationFilter }) => {
                           className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer text-sm text-slate-200 transition-colors flex items-center gap-2.5">
                           <span className="text-base">🏪</span> Mağazam
                         </div>
-
                         <div
                           onClick={() => {
                             setIsProfileMenuOpen(false);
