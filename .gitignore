@@ -15,3 +15,7 @@ db.sqlite3
 # VS Code / Editör ayarları
 .vscode/
 .idea/
+
+# Medya Yüklemeleri (Kullanıcı Dosyaları)
+media/
+media/*
