@@ -37,7 +37,6 @@ class PasswordResetOTP(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def is_valid(self):
-        # Kodun ömrü tam olarak 3 dakika (180 saniye)
         return timezone.now() <= self.created_at + timedelta(minutes=3)
     
 
@@ -50,25 +49,24 @@ class Wallet(models.Model):
     def __str__(self):
         return f"{self.user.email} - Bakiye: {self.balance} ₺"
 
-# 2. CÜZDAN HAREKETLERİ (Geçmiş)
 class WalletTransaction(models.Model):
     TRANSACTION_TYPES = (
-        ('DEPOSIT', 'Para Yükleme'),     # Kredi/Banka kartından cüzdana yükleme
-        ('WITHDRAWAL', 'Para Çekme'),    # Cüzdandan IBAN'a aktarma
-        ('PAYMENT', 'Ödeme (Kiralama)'), # Kiralama için cüzdandan harcama
-        ('INCOME', 'Kira Geliri'),       # Kiralamadan cüzdana gelen para
-        ('REFUND', 'İade'),              # İptal durumunda cüzdana iade
+        ('DEPOSIT', 'Para Yükleme'),     
+        ('WITHDRAWAL', 'Para Çekme'),    
+        ('PAYMENT', 'Ödeme (Kiralama)'), 
+        ('INCOME', 'Kira Geliri'),       
+        ('REFUND', 'İade'),              
     )
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+    # 255 karakter açıklamalarımız için fazlasıyla yeterli olacak.
     description = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.wallet.user.email} - {self.get_transaction_type_display()} - {self.amount} ₺"
 
-# 3. IBAN'A PARA ÇEKME TALEPLERİ
 class WithdrawalRequest(models.Model):
     STATUS_CHOICES = (
         ('PENDING', 'Bekliyor'),
@@ -88,6 +86,5 @@ class WithdrawalRequest(models.Model):
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def create_user_wallet(sender, instance, created, **kwargs):
-    """Yeni bir kullanıcı oluşturulduğunda otomatik Wallet oluşturur."""
     if created:
         Wallet.objects.create(user=instance)

@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 # 🎯 DİKKAT: PayWithWalletView'i buraya import ettik!
-from .views import CategoryViewSet, ItemViewSet, BookingViewSet, ConversationViewSet, ReviewViewSet, notification_list, notification_delete, PayWithWalletView
+from .views import CategoryViewSet, ItemViewSet, BookingViewSet, ConversationViewSet, ReviewViewSet, notification_list, notification_delete, PayWithWalletView, notification_clear_all
 
 router = DefaultRouter()
 router.register(r'categories', CategoryViewSet, basename='category')
@@ -19,6 +19,7 @@ urlpatterns = [
 
     path('notifications/', notification_list, name='notifications'),
     path('notifications/<int:pk>/', notification_delete, name='notification_delete'),
+    path('api/items/notifications/clear_all/', notification_clear_all),
     
     # Router her zaman en altta kalmalı
     path('', include(router.urls)),

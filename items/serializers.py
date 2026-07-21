@@ -174,6 +174,9 @@ class BookingSerializer(serializers.ModelSerializer):
     handover_images = serializers.SerializerMethodField()
     return_images = serializers.SerializerMethodField()
     has_review = serializers.SerializerMethodField()
+    
+    # 🎯 YENİ: İptal edeni frontend'e "Ahmet Yılmaz" gibi şık bir formatta gönderiyoruz
+    cancelled_by_name = serializers.CharField(source='cancelled_by.first_name', read_only=True)
 
     class Meta:
         model = Booking
@@ -181,7 +184,7 @@ class BookingSerializer(serializers.ModelSerializer):
             'id', 'item', 'item_detail', 'renter', 'renter_name', 
             'start_date', 'end_date', 'status', 'total_price', 'deposit_price', 
             'handover_pin', 'return_pin', 'handover_images', 'return_images', 
-            'dispute_reason', 'has_review', 'created_at'
+            'dispute_reason', 'has_review', 'cancelled_by_name', 'created_at' # cancelled_by_name eklendi
         ]
         read_only_fields = ['renter', 'total_price', 'deposit_price', 'status', 'handover_pin', 'return_pin', 'handover_images', 'return_images']
 
@@ -217,7 +220,10 @@ class MessageSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Message
-        fields = ['id', 'conversation', 'sender', 'sender_name', 'content', 'is_read', 'created_at']
+        fields = [
+            'id', 'conversation', 'sender', 'sender_name', 'content', 'is_read', 'created_at',
+            'is_offer', 'offer_price', 'offer_start_date', 'offer_end_date', 'offer_status'
+        ]
         read_only_fields = ['sender', 'is_read', 'created_at']
 
 

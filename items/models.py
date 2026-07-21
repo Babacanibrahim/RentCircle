@@ -40,6 +40,8 @@ class Item(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
     
     is_available = models.BooleanField(default=True)
+    is_banned = models.BooleanField(default=False)
+    banned_until = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -71,11 +73,12 @@ class Booking(models.Model):
     handover_pin = models.CharField(max_length=6, blank=True, null=True)
     return_pin = models.CharField(max_length=6, blank=True, null=True)
     
+    # 🎯 YENİ: Kimin iptal ettiğini takip etmek için
+    cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='cancelled_bookings')
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-
-    # Yönetici müdahalesi için bu alan açık ve düzenlenebilir kalacak
     dispute_reason = models.TextField(blank=True, null=True) 
 
     def generate_pin(self, length=6):
@@ -86,8 +89,14 @@ class Booking(models.Model):
         if self.start_date and self.end_date and self.item:
             days = (self.end_date - self.start_date).days + 1
             if days <= 0: days = 1
-            self.total_price = self.item.price_per_day * days
-            self.deposit_price = self.total_price * Decimal('0.15')
+            
+            # 🎯 KRİTİK DÜZELTME: Eğer total_price dışarıdan (tekliften) gelmemişse standart hesapla!
+            # Eğer geldiyse, anlaşılan o teklif fiyatına dokunma.
+            if not self.total_price:
+                self.total_price = self.item.price_per_day * days
+                
+            # Depozitoyu (Standart veya Pazarlıklı) o anki total_price üzerinden hesapla
+            self.deposit_price = Decimal(str(self.total_price)) * Decimal('0.15')
             
         if not self.handover_pin:
             self.handover_pin = self.generate_pin()
@@ -153,6 +162,18 @@ class Message(models.Model):
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
     content = models.TextField()
     is_read = models.BooleanField(default=False)
+    
+    # 🎯 YENİ: Teklif (Pazarlık) Sistemi Alanları
+    is_offer = models.BooleanField(default=False) # Bu mesaj bir teklif mi?
+    offer_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    offer_start_date = models.DateField(blank=True, null=True)
+    offer_end_date = models.DateField(blank=True, null=True)
+    offer_status = models.CharField(
+        max_length=20, 
+        choices=[('pending', 'Bekliyor'), ('accepted', 'Kabul Edildi'), ('rejected', 'Reddedildi')], 
+        blank=True, null=True
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -168,7 +189,7 @@ class Review(models.Model):
     reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews_given')
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews_received')
     
-    rating = models.IntegerField(choices=[(i, i) for i in range(1, 6)]) # 1'den 5'e kadar puan
+    rating = models.IntegerField(choices=[(i, i) for i in range(1, 6)]) 
     comment = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -180,34 +201,32 @@ class Review(models.Model):
     
 
 class Notification(models.Model):
+    # 🎯 YENİ: Bildirim türlerine Finansal ve İptal/Sistem türlerini ekledik.
     NOTIFICATION_TYPES = (
         ('message', 'Mesaj'),
         ('booking', 'Kiralama Talebi'),
+        ('wallet', 'Cüzdan ve Finans'),
+        ('system', 'İptal ve Sistem'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    sender = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    sender = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True) # Sistem bildirimlerinde sender null olabilir
     item = models.ForeignKey(Item, on_delete=models.CASCADE, null=True, blank=True)
     notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
     
-    # Gruplama için referans (Conversation ID veya Booking ID tutacak)
     reference_id = models.CharField(max_length=50)
     message = models.CharField(max_length=255)
     
-    is_read = models.BooleanField(default=False) # İkona tıklanınca true olur (Sayıdan düşer)
+    is_read = models.BooleanField(default=False) 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
 
 
-# 2. OTOMATİK BİLDİRİM OLUŞTURUCULAR (SİNYALLER)
 @receiver(post_save, sender=Message)
 def create_message_notification(sender, instance, created, **kwargs):
     if created:
-        # Mesajı alan kişiyi bul
         recipient = instance.conversation.owner if instance.sender == instance.conversation.renter else instance.conversation.renter
-        
-        # update_or_create hayat kurtarır: Aynı sohbetten yeni mesaj gelirse yeni bildirim açmaz, olanı günceller ve okunmadı yapar!
         Notification.objects.update_or_create(
             user=recipient,
             notification_type='message',
@@ -216,7 +235,7 @@ def create_message_notification(sender, instance, created, **kwargs):
                 'sender': instance.sender,
                 'item': instance.conversation.item,
                 'message': f"{instance.sender.first_name} size yeni bir mesaj gönderdi.",
-                'is_read': False, # Yeniden okunmadı statüsüne çeker
+                'is_read': False,
                 'created_at': timezone.now()
             }
         )
