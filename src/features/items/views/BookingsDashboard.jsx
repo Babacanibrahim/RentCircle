@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { itemApi } from "../services/itemApi";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast, cyberConfirm } from "../../../utils/alerts";
 
 const BookingsDashboard = () => {
   const [bookings, setBookings] = useState([]);
@@ -8,7 +9,6 @@ const BookingsDashboard = () => {
   const [activeTab, setActiveTab] = useState("renter");
   const [currentUserId, setCurrentUserId] = useState(null);
 
-  // PIN & FOTO Modal State'leri
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [pinActionType, setPinActionType] = useState("");
   const [selectedBookingId, setSelectedBookingId] = useState(null);
@@ -39,30 +39,56 @@ const BookingsDashboard = () => {
     fetchBookings();
   }, []);
 
+  // 🎯 YENİ: ŞIK ONAY PENCERESİ
   const handleApprove = async (id) => {
-    if (!window.confirm("Bu kiralamayı onaylamak istiyor musunuz?")) return;
+    const result = await cyberConfirm.fire({
+      title: "Talebi Onaylıyor musunuz?",
+      text: "Bu işlemi onayladığınızda kiralama bedeli cüzdanınıza aktarılacaktır.",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "✅ Evet, Onayla",
+      cancelButtonText: "Vazgeç",
+    });
+
+    if (!result.isConfirmed) return;
+
     try {
       await itemApi.approveBooking(id);
-      alert("Rezervasyon Onaylandı!");
+      toast.fire({ icon: "success", title: "Rezervasyon başarıyla onaylandı!" });
       fetchBookings();
     } catch (error) {
-      alert(error.response?.data?.error || "Hata oluştu.");
+      toast.fire({ icon: "error", title: error.response?.data?.error || "Hata oluştu." });
     }
   };
 
-  // 🎯 YENİ: 24 SAAT CEZA UYARILI İPTAL FONKSİYONU
+  // 🎯 YENİ: 24 SAAT UYARILI VE TEHLİKE RENKLİ İPTAL PENCERESİ
   const handleCancel = async (id, isApproved) => {
     const warningMsg = isApproved
-      ? "⚠️ DİKKAT: Bu işlem onaylanmış bir kiralama! Eğer başlangıç tarihine 24 saatten az kaldıysa ceza (bakiye kesintisi veya ilan yasaklaması) uygulanabilir. Yine de iptal etmek istiyor musunuz?"
+      ? "⚠️ DİKKAT: Bu kiralama onaylanmış! Başlangıç tarihine 24 saatten az kaldıysa bakiye kesintisi veya ilan yasaklaması uygulanabilir."
       : "Bu işlemi iptal etmek istediğinize emin misiniz?";
 
-    if (!window.confirm(warningMsg)) return;
+    const result = await cyberConfirm.fire({
+      title: isApproved ? "Riskli İptal İşlemi" : "İşlemi İptal Et",
+      text: warningMsg,
+      icon: isApproved ? "warning" : "question",
+      showCancelButton: true,
+      confirmButtonText: "❌ Evet, İptal Et",
+      cancelButtonText: "Vazgeç",
+      // 🎯 DÜZELTME: Sadece butona özel sınıf verdik, hataya sebep olan satırı sildik.
+      customClass: {
+        confirmButton:
+          "bg-rose-600 hover:bg-rose-500 text-white font-bold py-2.5 px-6 rounded-xl shadow-lg shadow-rose-500/20 mx-2 transition-transform hover:scale-105",
+      },
+    });
+
+    if (!result.isConfirmed) return;
+
     try {
       await itemApi.cancelBooking(id);
-      alert("İşlem başarıyla iptal edildi.");
+      toast.fire({ icon: "success", title: "İşlem başarıyla iptal edildi." });
       fetchBookings();
     } catch (error) {
-      alert(error.response?.data?.error || "Hata oluştu.");
+      toast.fire({ icon: "error", title: error.response?.data?.error || "İptal edilirken hata oluştu." });
     }
   };
 
@@ -77,22 +103,19 @@ const BookingsDashboard = () => {
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
     if (selectedFiles.length + files.length > 3) {
-      alert("En fazla 3 adet kanıt fotoğrafı yükleyebilirsiniz!");
+      toast.fire({ icon: "warning", title: "En fazla 3 fotoğraf yükleyebilirsiniz!" });
       return;
     }
     setSelectedFiles([...selectedFiles, ...files]);
   };
 
   const handleRemoveFile = (indexToRemove) => {
-    const confirmDelete = window.confirm("Bu fotoğrafı listeden silmek istediğinize emin misiniz?");
-    if (confirmDelete) {
-      setSelectedFiles(selectedFiles.filter((_, idx) => idx !== indexToRemove));
-    }
+    setSelectedFiles(selectedFiles.filter((_, idx) => idx !== indexToRemove));
   };
 
   const submitPin = async () => {
     if (selectedFiles.length === 0) {
-      alert("Güvenlik protokolü gereği en az 1 adet fotoğraf yüklemek zorunludur!");
+      toast.fire({ icon: "warning", title: "Güvenlik protokolü gereği en az 1 adet fotoğraf yüklemek zorunludur!" });
       return;
     }
 
@@ -105,16 +128,16 @@ const BookingsDashboard = () => {
     try {
       if (pinActionType === "handover") {
         await itemApi.handoverBooking(selectedBookingId, formData);
-        alert("Teslimat onaylandı, kiralama başarıyla başlatıldı!");
+        toast.fire({ icon: "success", title: "Teslimat onaylandı, kiralama başladı!" });
       } else if (pinActionType === "complete") {
         await itemApi.completeBooking(selectedBookingId, formData);
-        alert("İade onaylandı, kiralama süreci başarıyla tamamlandı!");
+        toast.fire({ icon: "success", title: "İade onaylandı, süreç tamamlandı!" });
       }
       setIsPinModalOpen(false);
       setSelectedFiles([]);
       fetchBookings();
     } catch (error) {
-      alert(error.response?.data?.error || "İşlem başarısız. Bilgileri kontrol edin.");
+      toast.fire({ icon: "error", title: error.response?.data?.error || "İşlem başarısız. Bilgileri kontrol edin." });
     }
   };
 
@@ -137,17 +160,15 @@ const BookingsDashboard = () => {
     return badges[status] || <span>{status}</span>;
   };
 
-  if (loading) return <div className="w-full relative flex justify-center pt-20 text-slate-500">Yükleniyor...</div>;
+  if (loading)
+    return <div className="w-full relative flex justify-center pt-20 text-slate-500 font-mono text-sm animate-pulse">YÜKLENİYOR...</div>;
 
   const filteredBookings = bookings.filter((b) => {
     if (!currentUserId) return false;
-
     const renterId = String(b.renter).toLowerCase();
     const ownerId = String(b.item_detail.owner).toLowerCase();
-
     const isUserRoleMatch = activeTab === "renter" ? renterId === currentUserId : ownerId === currentUserId;
     const isActiveStatus = ["pending_approval", "approved", "active"].includes(b.status);
-
     return isUserRoleMatch && isActiveStatus;
   });
 
@@ -205,7 +226,6 @@ const BookingsDashboard = () => {
                     </button>
                   )}
 
-                  {/* 🎯 YENİ: İptal Et Butonu Hem Alıcı Hem Satıcı İçin Onay Beklerken ve Onaylandıktan Sonra Gözükür */}
                   {["pending_approval", "approved"].includes(booking.status) && (
                     <button
                       onClick={() => handleCancel(booking.id, booking.status === "approved")}

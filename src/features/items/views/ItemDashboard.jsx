@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { itemApi } from "../services/itemApi";
 import ItemCard from "../components/ItemCard";
-import { useNavigate, useOutletContext } from "react-router-dom"; // 🎯 useOutletContext eklendi
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "../../../utils/alerts"; // 🎯 YENİ: Hata bildirimleri için
 
 const ItemDashboard = () => {
   const navigate = useNavigate();
-
-  // 🎯 DÜZELTME: Konum verisini MainLayout içindeki Outlet Context'ten güvenle çekiyoruz
   const { locationFilter } = useOutletContext() || {};
 
   const [items, setItems] = useState([]);
@@ -21,7 +20,6 @@ const ItemDashboard = () => {
   const [priceMax, setPriceMax] = useState("");
   const [availableOnly, setAvailableOnly] = useState(false);
 
-  // 🎯 Navbar'dan konum (city/district) değiştiğinde bu useEffect tetiklenir ve API'ye yansır
   useEffect(() => {
     const fetchDashboardData = async () => {
       setLoading(true);
@@ -31,10 +29,7 @@ const ItemDashboard = () => {
           district: locationFilter?.district || "",
         };
 
-        const [itemsData, categoriesData] = await Promise.all([
-          itemApi.getListings(filters), // Şehir ve ilçe parametreleri Backend'e iletiliyor
-          itemApi.getCategories(),
-        ]);
+        const [itemsData, categoriesData] = await Promise.all([itemApi.getListings(filters), itemApi.getCategories()]);
 
         setItems(itemsData);
         setCategories(categoriesData);
@@ -50,7 +45,7 @@ const ItemDashboard = () => {
   const handleCreateListingClick = () => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
     if (!token) {
-      alert("İlan vermek için lütfen önce giriş yapın.");
+      toast.fire({ icon: "info", title: "İlan vermek için lütfen önce giriş yapın." });
       return navigate("/login");
     }
     navigate("/create-listing");
@@ -100,7 +95,7 @@ const ItemDashboard = () => {
           </div>
           <button
             onClick={handleCreateListingClick}
-            className="btn-gradient px-5 py-3 cursor-pointer hover:scale-105 active:scale-95 transition-transform">
+            className="btn-gradient px-5 py-3 cursor-pointer hover:scale-[1.03] active:scale-95 transition-transform shadow-lg shadow-blue-500/20">
             + Yeni İlan Ver
           </button>
         </div>
@@ -112,7 +107,7 @@ const ItemDashboard = () => {
             </span>
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`btn-slate !py-2 !px-4 flex items-center gap-2 cursor-pointer transition-colors ${
+              className={`btn-slate !py-2 !px-4 flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95 transition-all ${
                 showFilters ? "bg-blue-500/20 border-blue-500/50 text-blue-400" : ""
               }`}>
               <span className="text-lg">⚙️</span> {showFilters ? "Filtreleri Gizle" : "Gelişmiş Filtreler"}
@@ -131,7 +126,9 @@ const ItemDashboard = () => {
                     <h3 className="text-xs font-black text-slate-100 uppercase tracking-wider flex items-center gap-2">🏷️ Kategoriler</h3>
                     <div className="max-h-36 overflow-y-auto scrollbar-thin space-y-2 pr-2">
                       {categories.map((cat) => (
-                        <label key={cat.id} className="flex items-center gap-3 cursor-pointer group">
+                        <label
+                          key={cat.id}
+                          className="flex items-center gap-3 cursor-pointer group hover:bg-slate-800/40 p-1.5 rounded-lg transition-colors">
                           <input
                             type="checkbox"
                             checked={selectedCategories.includes(cat.id)}
@@ -139,7 +136,7 @@ const ItemDashboard = () => {
                             className="w-4 h-4 rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer"
                           />
                           <span
-                            className={`text-sm transition-colors ${
+                            className={`text-sm transition-colors cursor-pointer ${
                               selectedCategories.includes(cat.id) ? "text-blue-400 font-bold" : "text-slate-300 group-hover:text-slate-100"
                             }`}>
                             {cat.name}
@@ -163,7 +160,7 @@ const ItemDashboard = () => {
                           placeholder="Min"
                           value={priceMin}
                           onChange={(e) => setPriceMin(e.target.value)}
-                          className="cyber-input !pl-8 w-full"
+                          className="cyber-input !pl-8 w-full hover:border-blue-500/50 transition-colors"
                         />
                       </div>
                       <span className="text-slate-500 font-bold">-</span>
@@ -175,7 +172,7 @@ const ItemDashboard = () => {
                           placeholder="Max"
                           value={priceMax}
                           onChange={(e) => setPriceMax(e.target.value)}
-                          className="cyber-input !pl-8 w-full"
+                          className="cyber-input !pl-8 w-full hover:border-blue-500/50 transition-colors"
                         />
                       </div>
                     </div>
@@ -184,14 +181,14 @@ const ItemDashboard = () => {
 
                   <div className="space-y-3">
                     <h3 className="text-xs font-black text-slate-100 uppercase tracking-wider flex items-center gap-2">🟢 İlan Durumu</h3>
-                    <label className="flex items-start gap-3 cursor-pointer group mt-2 p-3 rounded-xl bg-slate-800/30 border border-slate-700/50 hover:bg-slate-800/50 transition-colors">
+                    <label className="flex items-start gap-3 cursor-pointer group mt-2 p-3 rounded-xl bg-slate-800/30 border border-slate-700/50 hover:bg-slate-800/80 transition-colors shadow-inner">
                       <input
                         type="checkbox"
                         checked={availableOnly}
                         onChange={(e) => setAvailableOnly(e.target.checked)}
                         className="w-5 h-5 mt-0.5 rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-900 cursor-pointer"
                       />
-                      <div className="flex flex-col">
+                      <div className="flex flex-col cursor-pointer">
                         <span className={`text-sm font-bold transition-colors ${availableOnly ? "text-emerald-400" : "text-slate-200"}`}>
                           Sadece Şu An Müsait Olanlar
                         </span>
@@ -210,8 +207,9 @@ const ItemDashboard = () => {
                       setPriceMin("");
                       setPriceMax("");
                       setAvailableOnly(false);
+                      toast.fire({ icon: "success", title: "Filtreler temizlendi." });
                     }}
-                    className="text-xs text-slate-400 hover:text-rose-400 font-bold transition-colors cursor-pointer">
+                    className="text-xs text-slate-400 hover:text-rose-400 font-bold transition-colors cursor-pointer hover:scale-105 active:scale-95">
                     🗑️ Filtreleri Temizle
                   </button>
                 </div>

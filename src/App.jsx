@@ -8,10 +8,6 @@ import PublicRoute from "./features/components/PublicRoute";
 import PrivateRoute from "./features/components/PrivateRoute";
 import MainLayout from "./features/components/MainLayout";
 
-// Ödeme Dönüş Sayfaları
-import PaymentSuccess from "./features/components/PaymentSuccess";
-import PaymentFailed from "./features/components/PaymentFailed";
-
 // Uygulama İçi Sayfalar
 import ItemDashboard from "./features/items/views/ItemDashboard";
 import ItemDetail from "./features/items/views/ItemDetail";
@@ -141,24 +137,6 @@ function App() {
             element={
               <PrivateRoute>
                 <Favorites />
-              </PrivateRoute>
-            }
-          />
-
-          {/* ÖDEME DÖNÜŞ SAYFALARI */}
-          <Route
-            path="/payment-success"
-            element={
-              <PrivateRoute>
-                <PaymentSuccess />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/payment-failed"
-            element={
-              <PrivateRoute>
-                <PaymentFailed />
               </PrivateRoute>
             }
           />

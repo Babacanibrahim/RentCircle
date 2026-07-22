@@ -5,6 +5,7 @@ import { authApi } from "../services/authApi";
 import { occupationsList } from "../data/mockData";
 import formattedTurkeyData from "../data/parseData";
 import countriesJson from "../data/phoneCodes";
+import { toast } from "../../../utils/alerts"; // 🎯 YENİ
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -21,7 +22,7 @@ const Register = () => {
     district: "",
     occupation: "",
   });
-  const [statusInfo, setStatusInfo] = useState({ type: "", message: "" });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
   const handleCityChange = (e) => setFormData({ ...formData, city: e.target.value, district: "" });
@@ -43,12 +44,17 @@ const Register = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setStatusInfo({ type: "", message: "" });
+    setIsSubmitting(true);
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(formData.email)) return setStatusInfo({ type: "error", message: "Lütfen geçerli bir e-posta adresi giriniz." });
-    if (formData.password !== formData.confirm_password)
-      return setStatusInfo({ type: "error", message: "Girdiğiniz şifreler birbiriyle uyuşmuyor." });
+    if (!emailRegex.test(formData.email)) {
+      setIsSubmitting(false);
+      return toast.fire({ icon: "warning", title: "Lütfen geçerli bir e-posta adresi giriniz." });
+    }
+    if (formData.password !== formData.confirm_password) {
+      setIsSubmitting(false);
+      return toast.fire({ icon: "error", title: "Girdiğiniz şifreler birbiriyle uyuşmuyor." });
+    }
 
     if (formData.date_of_birth) {
       const dob = new Date(formData.date_of_birth);
@@ -56,7 +62,10 @@ const Register = () => {
       let age = today.getFullYear() - dob.getFullYear();
       const monthDiff = today.getMonth() - dob.getMonth();
       if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) age--;
-      if (age < 18) return setStatusInfo({ type: "error", message: "Platforma kayıt olabilmek için en az 18 yaşında olmalısınız." });
+      if (age < 18) {
+        setIsSubmitting(false);
+        return toast.fire({ icon: "error", title: "Platforma kayıt olabilmek için en az 18 yaşında olmalısınız." });
+      }
     }
 
     const finalData = {
@@ -67,57 +76,111 @@ const Register = () => {
 
     try {
       const data = await authApi.register(finalData);
-      setStatusInfo({ type: "success", message: data.message });
+      toast.fire({ icon: "success", title: data.message || "Kayıt başarılı! Lütfen e-postanızı onaylayın." });
+
+      // Kayıt başarılı olunca formu sıfırlayalım ki tekrar basmasın
+      setFormData({
+        username: "",
+        email: "",
+        password: "",
+        confirm_password: "",
+        first_name: "",
+        last_name: "",
+        date_of_birth: "",
+        country_code: "+90",
+        phone: "",
+        city: "",
+        district: "",
+        occupation: "",
+      });
     } catch (err) {
       const errMsg = err.response?.data ? Object.values(err.response.data).flat().join(" ") : "Bir hata oluştu.";
-      setStatusInfo({ type: "error", message: errMsg });
+      toast.fire({ icon: "error", title: errMsg });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <AuthLayout title="Aramıza Katıl" subtitle="Hesabını oluştur, e-postanı onayla ve güvenli kiralamaya baş.">
-      <AnimatePresence mode="wait">
-        {statusInfo.message && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className={`p-4 rounded-xl text-sm font-medium border ${statusInfo.type === "success" ? "bg-emerald-900/30 text-emerald-400 border-emerald-800/50" : "bg-rose-900/30 text-rose-400 border-rose-800/50"}`}>
-            {statusInfo.message}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
+    <AuthLayout title="Aramıza Katıl" subtitle="Hesabını oluştur, e-postanı onayla ve güvenli kiralamaya başla.">
       <form onSubmit={handleSubmit} className="space-y-3.5 max-h-[75vh] overflow-y-auto pr-2 scrollbar-thin">
         <div className="grid grid-cols-2 gap-4">
-          <input type="text" name="first_name" onChange={handleChange} required className="cyber-input" placeholder="İsim" />
-          <input type="text" name="last_name" onChange={handleChange} required className="cyber-input" placeholder="Soyisim" />
+          <input
+            type="text"
+            name="first_name"
+            value={formData.first_name}
+            onChange={handleChange}
+            required
+            className="cyber-input hover:border-blue-500/50 transition-colors"
+            placeholder="İsim"
+          />
+          <input
+            type="text"
+            name="last_name"
+            value={formData.last_name}
+            onChange={handleChange}
+            required
+            className="cyber-input hover:border-blue-500/50 transition-colors"
+            placeholder="Soyisim"
+          />
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <input type="text" name="username" onChange={handleChange} required className="cyber-input" placeholder="Kullanıcı Adı" />
-          <input type="date" name="date_of_birth" onChange={handleChange} required className="cyber-input" />
+          <input
+            type="text"
+            name="username"
+            value={formData.username}
+            onChange={handleChange}
+            required
+            className="cyber-input hover:border-blue-500/50 transition-colors"
+            placeholder="Kullanıcı Adı"
+          />
+          <input
+            type="date"
+            name="date_of_birth"
+            value={formData.date_of_birth}
+            onChange={handleChange}
+            required
+            className="cyber-input hover:border-blue-500/50 transition-colors cursor-pointer"
+          />
         </div>
-        <input type="email" name="email" onChange={handleChange} required className="cyber-input" placeholder="E-posta" />
+        <input
+          type="email"
+          name="email"
+          value={formData.email}
+          onChange={handleChange}
+          required
+          className="cyber-input w-full hover:border-blue-500/50 transition-colors"
+          placeholder="E-posta"
+        />
         <div className="grid grid-cols-2 gap-4">
-          <input type="password" name="password" onChange={handleChange} required className="cyber-input" placeholder="Şifre" />
+          <input
+            type="password"
+            name="password"
+            value={formData.password}
+            onChange={handleChange}
+            required
+            className="cyber-input hover:border-blue-500/50 transition-colors"
+            placeholder="Şifre"
+          />
           <input
             type="password"
             name="confirm_password"
+            value={formData.confirm_password}
             onChange={handleChange}
             required
-            className="cyber-input"
+            className="cyber-input hover:border-blue-500/50 transition-colors"
             placeholder="Şifre Tekrar"
           />
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-slate-400">Telefon Numarası</label>
+          <label className="text-xs font-semibold text-slate-400 cursor-default">Telefon Numarası</label>
           <div className="flex gap-2">
             <select
               name="country_code"
               value={formData.country_code}
               onChange={handleCountryCodeChange}
-              className="cyber-input max-w-[120px]">
+              className="cyber-input max-w-[120px] cursor-pointer hover:border-blue-500/50 transition-colors">
               {countriesJson.map((country, i) => (
                 <option key={i} value={country.dial_code}>
                   {country.code} ({country.dial_code})
@@ -131,7 +194,7 @@ const Register = () => {
               onChange={handlePhoneChange}
               maxLength={formData.country_code === "+90" ? "12" : "20"}
               required
-              className="cyber-input"
+              className="cyber-input w-full hover:border-blue-500/50 transition-colors"
               placeholder={formData.country_code === "+90" ? "555-555-5555" : "Telefon Numarası"}
             />
           </div>
@@ -139,8 +202,13 @@ const Register = () => {
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-400">Şehir</label>
-            <select name="city" value={formData.city} onChange={handleCityChange} required className="cyber-input">
+            <label className="text-xs font-semibold text-slate-400 cursor-default">Şehir</label>
+            <select
+              name="city"
+              value={formData.city}
+              onChange={handleCityChange}
+              required
+              className="cyber-input cursor-pointer hover:border-blue-500/50 transition-colors">
               <option value="">Şehir Seçin</option>
               {Object.keys(formattedTurkeyData).map((city, i) => (
                 <option key={i} value={city}>
@@ -150,14 +218,14 @@ const Register = () => {
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-400">İlçe</label>
+            <label className="text-xs font-semibold text-slate-400 cursor-default">İlçe</label>
             <select
               name="district"
               value={formData.district}
               onChange={handleChange}
               required
               disabled={!formData.city}
-              className="cyber-input disabled:opacity-40 disabled:cursor-not-allowed">
+              className="cyber-input cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:border-blue-500/50 transition-colors">
               <option value="">İlçe Seçin</option>
               {formData.city &&
                 formattedTurkeyData[formData.city]?.districts.map((dist, i) => (
@@ -170,8 +238,13 @@ const Register = () => {
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-slate-400">Meslek</label>
-          <select name="occupation" onChange={handleChange} required className="cyber-input">
+          <label className="text-xs font-semibold text-slate-400 cursor-default">Meslek</label>
+          <select
+            name="occupation"
+            value={formData.occupation}
+            onChange={handleChange}
+            required
+            className="cyber-input cursor-pointer hover:border-blue-500/50 transition-colors">
             <option value="">Meslek Seçin</option>
             {occupationsList.map((occ, i) => (
               <option key={i} value={occ}>
@@ -181,8 +254,11 @@ const Register = () => {
           </select>
         </div>
 
-        <button type="submit" className="btn-gradient w-full p-3.5 mt-2">
-          Hesap Oluştur
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="btn-gradient w-full p-3.5 mt-2 cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed">
+          {isSubmitting ? "Kaydediliyor..." : "Hesap Oluştur"}
         </button>
       </form>
     </AuthLayout>

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import axios from "axios";
 import formattedTurkeyData from "../auth/data/parseData";
 import { itemApi } from "../items/services/itemApi";
+import { toast, cyberConfirm } from "../../utils/alerts"; // 🎯 YENİ: Bildirim kütüphanesi
 
 const Navbar = ({ onLocationFilter }) => {
   const navigate = useNavigate();
@@ -101,24 +102,49 @@ const Navbar = ({ onLocationFilter }) => {
 
   const handleDeleteNotification = async (e, id) => {
     e.stopPropagation();
-    if (window.confirm("Bu bildirimi silmek istediğinizden emin misiniz?")) {
+
+    // 🎯 DÜZELTME: window.confirm yerine cyberConfirm
+    const result = await cyberConfirm.fire({
+      title: "Bildirimi Sil",
+      text: "Bu bildirimi silmek istediğinize emin misiniz?",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Evet, Sil",
+      cancelButtonText: "Vazgeç",
+    });
+
+    if (result.isConfirmed) {
       try {
         await itemApi.deleteNotification(id);
         setNotifications(notifications.filter((n) => n.id !== id));
       } catch (err) {
-        console.error("Bildirim silinemedi:", err);
+        toast.fire({ icon: "error", title: "Bildirim silinemedi." });
       }
     }
   };
 
-  // 🎯 YENİ: TÜM BİLDİRİMLERİ TEMİZLE FONKSİYONU
   const handleClearAllNotifications = async () => {
-    if (window.confirm("Tüm bildirimleri kalıcı olarak silmek istediğinize emin misiniz?")) {
+    // 🎯 DÜZELTME: window.confirm yerine cyberConfirm
+    const result = await cyberConfirm.fire({
+      title: "Tümünü Temizle",
+      text: "Tüm bildirimleri kalıcı olarak silmek istediğinize emin misiniz?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Evet, Temizle",
+      cancelButtonText: "Vazgeç",
+      customClass: {
+        confirmButton:
+          "bg-rose-600 hover:bg-rose-500 text-white font-bold py-2.5 px-6 rounded-xl shadow-lg shadow-rose-500/20 mx-2 transition-transform hover:scale-105",
+      },
+    });
+
+    if (result.isConfirmed) {
       try {
         await itemApi.clearAllNotifications();
-        setNotifications([]); // Ekranda anında sıfırla
+        setNotifications([]);
+        toast.fire({ icon: "success", title: "Tüm bildirimler temizlendi." });
       } catch (err) {
-        console.error("Bildirimler temizlenemedi:", err);
+        toast.fire({ icon: "error", title: "Bildirimler temizlenemedi." });
       }
     }
   };
@@ -132,16 +158,28 @@ const Navbar = ({ onLocationFilter }) => {
   };
 
   const handleLogout = async () => {
-    try {
-      // Backend logout logic
-    } catch (error) {
-      console.error(error);
-    } finally {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      sessionStorage.removeItem("access_token");
-      sessionStorage.removeItem("refresh_token");
-      navigate("/login");
+    const result = await cyberConfirm.fire({
+      title: "Çıkış Yap",
+      text: "Hesabınızdan çıkış yapmak istediğinize emin misiniz?",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Evet, Çıkış Yap",
+      cancelButtonText: "İptal",
+    });
+
+    if (result.isConfirmed) {
+      try {
+        // Backend logout logic
+      } catch (error) {
+        console.error(error);
+      } finally {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        sessionStorage.removeItem("access_token");
+        sessionStorage.removeItem("refresh_token");
+        navigate("/login");
+        setIsProfileMenuOpen(false);
+      }
     }
   };
 
@@ -151,7 +189,7 @@ const Navbar = ({ onLocationFilter }) => {
   };
 
   const handleGetCurrentLocation = () => {
-    if (!navigator.geolocation) return alert("Tarayıcınız konum servislerini desteklemiyor.");
+    if (!navigator.geolocation) return toast.fire({ icon: "error", title: "Tarayıcınız konum servislerini desteklemiyor." });
     setIsGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -180,17 +218,18 @@ const Navbar = ({ onLocationFilter }) => {
               (d) => d.toLocaleLowerCase("tr-TR") === detectedDistrict.toLocaleLowerCase("tr-TR"),
             );
             setSelectedDistrict(matchedDistrict || "");
+            toast.fire({ icon: "success", title: "Konum başarıyla tespit edildi." });
           } else {
-            alert(`Konum tespit edildi (${detectedCity}), ancak servis ağımızda henüz ilan bulunmuyor.`);
+            toast.fire({ icon: "info", title: `Konum tespit edildi (${detectedCity}), ancak henüz bu bölgede hizmet vermiyoruz.` });
           }
         } catch (error) {
-          alert("Konum bilgisi alınırken bir hata oluştu.");
+          toast.fire({ icon: "error", title: "Konum bilgisi alınırken bir hata oluştu." });
         } finally {
           setIsGpsLoading(false);
         }
       },
       () => {
-        alert("Konum izni reddedildi veya alınamadı.");
+        toast.fire({ icon: "error", title: "Konum izni reddedildi veya alınamadı." });
         setIsGpsLoading(false);
       },
     );
@@ -201,6 +240,7 @@ const Navbar = ({ onLocationFilter }) => {
     setLocation(newLocation);
     setIsModalOpen(false);
     if (onLocationFilter) onLocationFilter(newLocation);
+    toast.fire({ icon: "success", title: "Konum filtreniz uygulandı." });
   };
 
   const getNotificationStyle = (type, avatar) => {
@@ -232,7 +272,7 @@ const Navbar = ({ onLocationFilter }) => {
 
           <div
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-[#1e293b]/60 border border-[#475569]/60 rounded-xl hover:border-blue-500/40 transition-all duration-300 cursor-pointer max-w-xs sm:max-w-sm w-full shadow-inner group">
+            className="flex items-center gap-2 px-4 py-2 bg-[#1e293b]/60 border border-[#475569]/60 rounded-xl hover:border-blue-500/40 transition-all duration-300 cursor-pointer max-w-xs sm:max-w-sm w-full shadow-inner group active:scale-[0.98]">
             <span className="text-blue-400 text-sm group-hover:animate-bounce">📍</span>
             <div className="flex-1 text-left overflow-hidden cursor-pointer">
               <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider font-mono">Bölge Seçimi</span>
@@ -240,7 +280,7 @@ const Navbar = ({ onLocationFilter }) => {
                 {location.city ? `${location.city} ${location.district ? `• ${location.district}` : "• Tüm İlçeler"}` : "Tüm Türkiye"}
               </span>
             </div>
-            <span className="text-[10px] text-blue-400 font-bold bg-blue-500/10 px-2 py-1 rounded-md border border-blue-500/20 cursor-pointer">
+            <span className="text-[10px] text-blue-400 font-bold bg-blue-500/10 px-2 py-1 rounded-md border border-blue-500/20 cursor-pointer hover:bg-blue-500/20 transition-colors">
               DEĞİŞTİR
             </span>
           </div>
@@ -251,7 +291,7 @@ const Navbar = ({ onLocationFilter }) => {
                 <div className="relative">
                   <div
                     onClick={handleBellClick}
-                    className="relative flex items-center justify-center w-10 h-10 rounded-full bg-[#1e293b]/80 border border-[#475569]/50 hover:bg-[#334155] transition-colors cursor-pointer group">
+                    className="relative flex items-center justify-center w-10 h-10 rounded-full bg-[#1e293b]/80 border border-[#475569]/50 hover:bg-[#334155] transition-colors cursor-pointer group active:scale-95">
                     <span className="text-lg group-hover:rotate-12 transition-transform">🔔</span>
                     {unreadCount > 0 && (
                       <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white flex items-center justify-center rounded-full text-[9px] font-black border border-[#0f172a] shadow-sm shadow-red-500/50 animate-pulse">
@@ -270,13 +310,12 @@ const Navbar = ({ onLocationFilter }) => {
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         transition={{ duration: 0.15 }}
                         className="absolute right-0 top-14 w-80 md:w-96 cyber-card bg-[#1e293b] shadow-2xl z-50 flex flex-col py-3 border border-[#475569]/60">
-                        {/* 🎯 BİLDİRİM BAŞLIĞI VE TÜMÜNÜ TEMİZLE BUTONU */}
-                        <div className="px-4 pb-2 border-b border-[#475569]/40 mb-2 flex justify-between items-center">
+                        <div className="px-4 pb-2 border-b border-[#475569]/40 mb-2 flex justify-between items-center cursor-default">
                           <h3 className="text-xs font-black text-slate-200 uppercase tracking-wider">Bildirimleriniz</h3>
                           {notifications.length > 0 && (
                             <button
                               onClick={handleClearAllNotifications}
-                              className="text-[10px] text-blue-400 hover:text-blue-300 font-bold tracking-wider transition-colors cursor-pointer">
+                              className="text-[10px] text-blue-400 hover:text-blue-300 font-bold tracking-wider transition-colors cursor-pointer active:scale-95">
                               Tümünü Temizle
                             </button>
                           )}
@@ -284,7 +323,7 @@ const Navbar = ({ onLocationFilter }) => {
 
                         <div className="max-h-[350px] overflow-y-auto scrollbar-thin">
                           {notifications.length === 0 ? (
-                            <div className="px-4 py-8 text-center text-slate-500">
+                            <div className="px-4 py-8 text-center text-slate-500 cursor-default">
                               <span className="text-3xl block mb-2 opacity-50">📭</span>
                               <p className="text-xs font-mono">Tüm bildirimleri okudunuz.</p>
                             </div>
@@ -295,7 +334,7 @@ const Navbar = ({ onLocationFilter }) => {
                                 <div
                                   key={notif.id}
                                   onClick={() => handleNotificationClick(notif)}
-                                  className="p-3 border-b border-slate-700/30 hover:bg-slate-700/40 transition-colors cursor-pointer flex gap-3 items-start group relative">
+                                  className="p-3 border-b border-slate-700/30 hover:bg-slate-700/40 transition-colors cursor-pointer flex gap-3 items-start group relative active:bg-slate-700/60">
                                   <div
                                     className={`w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center font-bold uppercase text-sm border ${style.bg}`}>
                                     {style.icon}
@@ -311,7 +350,7 @@ const Navbar = ({ onLocationFilter }) => {
 
                                   <button
                                     onClick={(e) => handleDeleteNotification(e, notif.id)}
-                                    className="absolute right-3 top-3 text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="absolute right-3 top-3 text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:scale-125 active:scale-90"
                                     title="Sil">
                                     ✕
                                   </button>
@@ -347,7 +386,7 @@ const Navbar = ({ onLocationFilter }) => {
                             setIsProfileMenuOpen(false);
                             navigate(`/stores/${currentUserId}`);
                           }}
-                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer text-sm text-slate-200 transition-colors flex items-center gap-2.5">
+                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer active:bg-slate-700/70 text-sm text-slate-200 transition-colors flex items-center gap-2.5">
                           <span className="text-base">🏪</span> Mağazam
                         </div>
                         <div
@@ -355,7 +394,7 @@ const Navbar = ({ onLocationFilter }) => {
                             setIsProfileMenuOpen(false);
                             navigate(`/wallet`);
                           }}
-                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer text-sm text-slate-200 transition-colors flex items-center gap-2.5">
+                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer active:bg-slate-700/70 text-sm text-slate-200 transition-colors flex items-center gap-2.5">
                           <span className="text-base">💵</span> Cüzdanım
                         </div>
                         <div
@@ -363,7 +402,7 @@ const Navbar = ({ onLocationFilter }) => {
                             setIsProfileMenuOpen(false);
                             navigate("/bookings");
                           }}
-                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer text-sm text-slate-200 transition-colors flex items-center gap-2.5">
+                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer active:bg-slate-700/70 text-sm text-slate-200 transition-colors flex items-center gap-2.5">
                           <span className="text-base">⚡</span> Aktif İşlemlerim
                         </div>
                         <div
@@ -371,7 +410,7 @@ const Navbar = ({ onLocationFilter }) => {
                             setIsProfileMenuOpen(false);
                             navigate("/history");
                           }}
-                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer text-sm text-slate-200 transition-colors flex items-center gap-2.5">
+                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer active:bg-slate-700/70 text-sm text-slate-200 transition-colors flex items-center gap-2.5">
                           <span className="text-base">📜</span> Kiralama Geçmişim
                         </div>
                         <div
@@ -379,7 +418,7 @@ const Navbar = ({ onLocationFilter }) => {
                             setIsProfileMenuOpen(false);
                             navigate("/favorites");
                           }}
-                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer text-sm text-slate-200 transition-colors flex items-center gap-2.5">
+                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer active:bg-slate-700/70 text-sm text-slate-200 transition-colors flex items-center gap-2.5">
                           <span className="text-base">❤️</span> Favorilerim
                         </div>
                         <div
@@ -387,19 +426,19 @@ const Navbar = ({ onLocationFilter }) => {
                             setIsProfileMenuOpen(false);
                             navigate("/profile");
                           }}
-                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer text-sm text-slate-200 transition-colors flex items-center gap-2.5">
+                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer active:bg-slate-700/70 text-sm text-slate-200 transition-colors flex items-center gap-2.5">
                           <span className="text-base">⚙️</span> Profil
                         </div>
                         <Link
                           to="/chat"
                           onClick={() => setIsProfileMenuOpen(false)}
-                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer text-sm text-slate-200 transition-colors flex items-center gap-2.5">
+                          className="px-4 py-2.5 hover:bg-slate-700/50 cursor-pointer active:bg-slate-700/70 text-sm text-slate-200 transition-colors flex items-center gap-2.5">
                           <span className="text-base">💬</span> Mesajlar
                         </Link>
                         <div className="border-t border-[#475569]/40 my-1"></div>
                         <div
                           onClick={handleLogout}
-                          className="px-4 py-2.5 hover:bg-red-500/10 cursor-pointer text-sm font-bold text-red-400 transition-colors flex items-center gap-2.5">
+                          className="px-4 py-2.5 hover:bg-rose-500/10 cursor-pointer active:bg-rose-500/20 text-sm font-bold text-rose-400 transition-colors flex items-center gap-2.5">
                           <span className="text-base">🚪</span> Çıkış Yap
                         </div>
                       </motion.div>
@@ -409,12 +448,14 @@ const Navbar = ({ onLocationFilter }) => {
               </>
             ) : (
               <>
-                <button onClick={() => navigate("/login")} className="btn-slate !py-2 cursor-pointer hover:scale-105 active:scale-95">
+                <button
+                  onClick={() => navigate("/login")}
+                  className="btn-slate !py-2 cursor-pointer hover:scale-105 active:scale-95 transition-transform">
                   Giriş Yap
                 </button>
                 <button
                   onClick={() => navigate("/register")}
-                  className="btn-gradient hidden sm:block px-5 py-2.5 cursor-pointer hover:scale-105 active:scale-95">
+                  className="btn-gradient hidden sm:block px-5 py-2.5 cursor-pointer hover:scale-105 active:scale-95 transition-transform">
                   Kayıt Ol
                 </button>
               </>
@@ -444,7 +485,7 @@ const Navbar = ({ onLocationFilter }) => {
                 ✕
               </button>
 
-              <div>
+              <div className="cursor-default">
                 <h3 className="text-base font-black text-slate-100 flex items-center gap-1.5">🏙️ Konumunu Özelleştir</h3>
                 <p className="text-xs text-slate-400 mt-0.5">Sadece seçtiğin bölgedeki ilanları listeleriz.</p>
               </div>
@@ -457,11 +498,13 @@ const Navbar = ({ onLocationFilter }) => {
                 {isGpsLoading ? "⏳ Konum Çözümleniyor..." : "📡 Mevcut Konumumu Kullan (GPS)"}
               </button>
 
-              <div className="text-[#475569] text-[9px] font-mono font-bold uppercase tracking-wider text-center">- VEYA MANUEL SEÇ -</div>
+              <div className="text-[#475569] text-[9px] font-mono font-bold uppercase tracking-wider text-center cursor-default">
+                - VEYA MANUEL SEÇ -
+              </div>
 
               <div className="space-y-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">Şehir</label>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono cursor-default">Şehir</label>
                   <select
                     value={selectedCity}
                     onChange={handleCityChange}
@@ -476,7 +519,7 @@ const Navbar = ({ onLocationFilter }) => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">İlçe</label>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono cursor-default">İlçe</label>
                   <select
                     value={selectedDistrict}
                     onChange={(e) => setSelectedDistrict(e.target.value)}
@@ -495,7 +538,7 @@ const Navbar = ({ onLocationFilter }) => {
 
               <button
                 onClick={handleSaveFilters}
-                className="btn-gradient w-full p-3.5 cursor-pointer hover:scale-105 active:scale-95 transition-transform">
+                className="btn-gradient w-full p-3.5 cursor-pointer hover:scale-[1.02] active:scale-95 transition-transform shadow-lg shadow-blue-500/20">
                 Konumu Güncelle ve Filtrele
               </button>
             </motion.div>

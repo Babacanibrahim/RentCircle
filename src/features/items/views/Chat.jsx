@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom"; // 🎯 YENİ: useSearchParams eklendi
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { itemApi } from "../services/itemApi";
+import { toast, cyberConfirm } from "../../../utils/alerts";
 
 const Chat = () => {
   const navigate = useNavigate();
@@ -36,7 +37,6 @@ const Chat = () => {
         const chatList = data.results ? data.results : data;
         setConversations(chatList);
 
-        // 🎯 YENİ: URL parametreleri ile yönlendirme (Lazy loading)
         const convId = searchParams.get("conv_id");
         const newItemId = searchParams.get("new_item");
         const newItemTitle = searchParams.get("title");
@@ -45,12 +45,11 @@ const Chat = () => {
           const found = chatList.find((c) => String(c.id) === convId);
           if (found) setActiveChat(found);
         } else if (newItemId && !activeChat) {
-          // Henüz veritabanında olmayan (Lazy) sanal bir sohbet başlat
           setActiveChat({
             isNew: true,
             item_id: newItemId,
             item_title: newItemTitle,
-            owner_name: "Satıcı", // Gerçek isim ilk mesajdan sonra gelir
+            owner_name: "Satıcı",
             item_image: null,
             unread_count: 0,
           });
@@ -88,10 +87,8 @@ const Chat = () => {
       fetchMessages();
       interval = setInterval(fetchMessages, 3000);
     } else if (activeChat && activeChat.isNew) {
-      // Yeni sohbetse mesaj listesi boş
       setMessages([]);
     }
-
     return () => clearInterval(interval);
   }, [activeChat]);
 
@@ -104,18 +101,14 @@ const Chat = () => {
 
     try {
       if (activeChat.isNew) {
-        // 🎯 YENİ: Lazy Initialization - İlk mesaj atıldığında sohbet yaratılır
         const result = await itemApi.sendDirectMessage({
           item_id: activeChat.item_id,
           content: messageContent,
           is_offer: false,
         });
 
-        // Sanal chat'i kapat, gerçek chat ID'si ile URL'yi güncelle
         navigate(`/chat?conv_id=${result.conversation_id}`, { replace: true });
-        // Bir sonraki fetch döngüsünde chatList güncellenip activeChat'e oturacak
       } else {
-        // Zaten var olan sohbete mesaj gönder
         const sentMessage = await itemApi.sendMessage(activeChat.id, messageContent);
         setMessages((prev) => [...prev, sentMessage]);
 
@@ -127,8 +120,7 @@ const Chat = () => {
         setConversations(updatedChats.results ? updatedChats.results : updatedChats);
       }
     } catch (error) {
-      console.error("Mesaj iletilemedi:", error.response || error);
-      alert("Mesajınız iletilemedi. Lütfen bağlantınızı kontrol edin.");
+      toast.fire({ icon: "error", title: "Mesajınız iletilemedi. Lütfen bağlantınızı kontrol edin." });
       setNewMessage(messageContent);
     }
   };
@@ -138,43 +130,46 @@ const Chat = () => {
     const deposit = basePrice * 0.15;
     const totalToPay = basePrice + deposit;
 
-    const confirmPay = window.confirm(
-      `🤝 Kabul Edilen Teklif Tutarı: ₺${basePrice.toFixed(2)}\n` +
-        `🛡️ Güvence Bedeli (%15): ₺${deposit.toFixed(2)}\n\n` +
-        `Toplam ₺${totalToPay.toFixed(2)} cüzdanınızdan tahsil edilecektir. Onaylıyor musunuz?`,
-    );
+    const result = await cyberConfirm.fire({
+      title: "Hemen Öde ve Kirala",
+      html:
+        `🤝 Kabul Edilen Teklif Tutarı: <b>₺${basePrice.toFixed(2)}</b><br/>` +
+        `🛡️ Güvence Bedeli (%15): <b>₺${deposit.toFixed(2)}</b><br/><br/>` +
+        `Toplam <b>₺${totalToPay.toFixed(2)}</b> cüzdanınızdan tahsil edilecektir.`,
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "💳 Onayla ve Öde",
+      cancelButtonText: "İptal",
+    });
 
-    if (!confirmPay) return;
+    if (!result.isConfirmed) return;
 
     try {
       const payload = {
         start_date: msg.offer_start_date,
         end_date: msg.offer_end_date,
-        total_price: basePrice, // Sadece anlaşılan kira bedelini atıyoruz
+        total_price: basePrice,
       };
 
       await itemApi.payWithWallet(activeChat.item_id || activeChat.item, payload);
-      alert("✅ Ödeme başarılı! Kiralama işlemi başlatıldı.");
-      navigate("/bookings"); // İşlem bitince Kiralamalarım sayfasına gönder
+      toast.fire({ icon: "success", title: "Ödeme başarılı! Kiralama işlemi başlatıldı." });
+      navigate("/bookings");
     } catch (error) {
-      alert(error.response?.data?.error || "Ödeme işlemi başarısız oldu.");
+      toast.fire({ icon: "error", title: error.response?.data?.error || "Ödeme işlemi başarısız oldu." });
       if (error.response?.data?.error?.toLowerCase().includes("yetersiz")) {
         navigate("/wallet");
       }
     }
   };
 
-  // 🎯 YENİ: Satıcı Teklifi Yanıtlama Fonksiyonu
   const handleOfferResponse = async (messageId, action) => {
     try {
       await itemApi.respondToOffer(messageId, action);
-      alert(action === "accept" ? "Teklif Kabul Edildi!" : "Teklif Reddedildi.");
-
-      // Mesajları anında güncellemek için manuel bir tetikleme
+      toast.fire({ icon: "success", title: action === "accept" ? "Teklif Kabul Edildi!" : "Teklif Reddedildi." });
       const fetchedMessages = await itemApi.getMessages(activeChat.id);
       setMessages(fetchedMessages.results ? fetchedMessages.results : fetchedMessages);
     } catch (error) {
-      alert("İşlem başarısız: " + (error.response?.data?.error || "Bilinmeyen hata"));
+      toast.fire({ icon: "error", title: "İşlem başarısız: " + (error.response?.data?.error || "Bilinmeyen hata") });
     }
   };
 
@@ -206,7 +201,6 @@ const Chat = () => {
       <div className="absolute top-20 left-1/3 w-96 h-96 bg-blue-500/5 blur-[130px] rounded-full pointer-events-none" />
 
       <div className="max-w-7xl mx-auto w-full flex-1 flex gap-5 p-4 sm:p-6 lg:p-8 min-h-0 relative z-10">
-        {/* SOL TARAF: SOHBET LİSTESİ */}
         <div className="cyber-card w-full md:w-1/3 lg:w-1/4 flex flex-col h-full overflow-hidden shrink-0">
           <div className="p-4 border-b border-[#475569]/40 bg-[#0f172a]/40">
             <h2 className="text-sm font-black text-slate-100 tracking-wide font-mono uppercase">💬 Mesajlarım</h2>
@@ -225,19 +219,19 @@ const Chat = () => {
                 return (
                   <motion.div
                     key={chat.id}
-                    whileHover={{ scale: 1.01, x: 2 }}
-                    whileTap={{ scale: 0.99 }}
+                    whileHover={{ scale: 1.02, x: 4 }}
+                    whileTap={{ scale: 0.98 }}
                     onClick={() => {
                       setActiveChat(chat);
                       setConversations((prev) => prev.map((c) => (c.id === chat.id ? { ...c, unread_count: 0 } : c)));
-                      navigate(`/chat?conv_id=${chat.id}`); // URL'yi temizle
+                      navigate(`/chat?conv_id=${chat.id}`);
                     }}
                     className={`p-3 rounded-xl cursor-pointer transition-all border flex items-center gap-3 relative ${
                       isActive
                         ? "bg-gradient-to-r from-blue-500/10 to-indigo-500/10 border-blue-500/50 shadow-md shadow-blue-500/5"
                         : hasUnread
                           ? "bg-blue-500/20 border-blue-400/50 shadow-lg shadow-blue-500/10"
-                          : "bg-slate-800/10 border-transparent hover:border-[#475569]/30 hover:bg-slate-800/40"
+                          : "bg-slate-800/10 border-transparent hover:border-[#475569]/50 hover:bg-slate-800/40"
                     }`}>
                     <div className="w-12 h-12 rounded-lg bg-slate-700/50 shrink-0 overflow-hidden border border-slate-600/50 relative">
                       {chat.item_image ? (
@@ -273,21 +267,28 @@ const Chat = () => {
           </div>
         </div>
 
-        {/* SAĞ TARAF: AKTİF SOHBET EKRANI */}
         <div className="cyber-card flex-1 flex flex-col h-full overflow-hidden">
           {activeChat ? (
             <>
-              {/* SOHBET ÜST BİLGİ ALANI */}
               <div className="p-4 border-b border-[#475569]/40 flex items-center justify-between bg-[#0f172a]/40 backdrop-blur-md">
                 <div className="flex items-center gap-4">
                   {activeChat.item_image && (
-                    <img src={activeChat.item_image} alt="ilan" className="w-10 h-10 rounded-md object-cover border border-slate-600/50" />
+                    <img
+                      src={activeChat.item_image}
+                      alt="ilan"
+                      className="w-10 h-10 rounded-md object-cover border border-slate-600/50 cursor-pointer hover:scale-110 transition-transform"
+                      onClick={() => navigate(`/listings/${activeChat.item_id || activeChat.item}`)}
+                    />
                   )}
                   <div>
                     <h3 className="text-sm font-black text-slate-100 tracking-tight flex items-center gap-2">
-                      {activeChat.item_title}
+                      <span
+                        className="cursor-pointer hover:text-blue-400 transition-colors"
+                        onClick={() => navigate(`/listings/${activeChat.item_id || activeChat.item}`)}>
+                        {activeChat.item_title}
+                      </span>
                       {activeChat.item_price && (
-                        <span className="text-xs font-mono text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                        <span className="text-xs font-mono text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 rounded cursor-default">
                           ₺{activeChat.item_price}/Gün
                         </span>
                       )}
@@ -301,24 +302,23 @@ const Chat = () => {
                           {partner.name}
                         </span>
                       ) : (
-                        <span className="text-slate-300">{partner.name}</span>
+                        <span className="text-slate-300 cursor-default">{partner.name}</span>
                       )}
-                      <span className="text-[9px] bg-slate-700/50 px-1.5 py-0.5 rounded font-mono">{partner.role}</span>
+                      <span className="text-[9px] bg-slate-700/50 px-1.5 py-0.5 rounded font-mono cursor-default">{partner.role}</span>
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => navigate(`/listings/${activeChat.item_id || activeChat.item}`)}
-                  className="btn-slate text-[10px] !py-1.5 !px-3">
+                  className="btn-slate text-[10px] !py-1.5 !px-3 hover:scale-105 active:scale-95 transition-transform cursor-pointer hover:bg-slate-700">
                   İlana Git ↗
                 </button>
               </div>
 
-              {/* MESAJLAŞMA ALANI */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin flex flex-col bg-[#0f172a]/15">
                 {messages.length === 0 ? (
                   <div className="flex-1 flex items-center justify-center flex-col text-slate-500">
-                    <span className="text-3xl mb-2">👋</span>
+                    <span className="text-3xl mb-2 animate-bounce">👋</span>
                     <p className="text-xs font-mono text-center">
                       {activeChat.isNew
                         ? "Bu satıcıya henüz mesaj göndermediniz. Sorularınızı sorabilir veya teklif verebilirsiniz."
@@ -329,7 +329,6 @@ const Chat = () => {
                   messages.map((msg) => {
                     const isMe = String(msg.sender).toLowerCase() === currentUserId;
 
-                    // 🎯 YENİ: EĞER MESAJ BİR TEKLİFSE FARKLI BİR KART (COMPONENT) ÇİZİLİR
                     if (msg.is_offer) {
                       return (
                         <motion.div
@@ -338,13 +337,13 @@ const Chat = () => {
                           animate={{ opacity: 1, y: 0 }}
                           className={`flex flex-col w-full max-w-[85%] ${isMe ? "self-end items-end" : "self-start items-start"}`}>
                           <div
-                            className={`p-4 rounded-2xl shadow-md border ${msg.offer_status === "accepted" ? "bg-emerald-900/20 border-emerald-500/30" : msg.offer_status === "rejected" ? "bg-rose-900/20 border-rose-500/30" : "bg-amber-900/20 border-amber-500/30"}`}>
+                            className={`p-4 rounded-2xl shadow-md border transition-all ${msg.offer_status === "accepted" ? "bg-emerald-900/20 border-emerald-500/30" : msg.offer_status === "rejected" ? "bg-rose-900/20 border-rose-500/30" : "bg-amber-900/20 border-amber-500/30"}`}>
                             <div className="flex items-center gap-2 mb-3">
                               <span className="text-lg">🤝</span>
                               <span className="text-xs font-black tracking-widest uppercase text-slate-200">ÖZEL TEKLİF KARTI</span>
                             </div>
 
-                            <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 space-y-2 mb-3">
+                            <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 space-y-2 mb-3 cursor-default hover:bg-slate-900/70 transition-colors">
                               <div className="flex justify-between text-xs">
                                 <span className="text-slate-400">Tarih Aralığı:</span>
                                 <span className="font-mono text-slate-200">
@@ -359,10 +358,9 @@ const Chat = () => {
 
                             <p className="text-xs text-slate-300 italic mb-4">"{msg.content}"</p>
 
-                            {/* DURUM ROZETLERİ VEYA BUTONLAR */}
                             {msg.offer_status === "pending" ? (
                               isMe ? (
-                                <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20">
+                                <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20 cursor-default">
                                   ⏳ Satıcıdan yanıt bekleniyor...
                                 </div>
                               ) : (
@@ -370,39 +368,38 @@ const Chat = () => {
                                   <div className="flex gap-2">
                                     <button
                                       onClick={() => handleOfferResponse(msg.id, "reject")}
-                                      className="flex-1 btn-slate !py-1.5 text-[10px] !text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30">
+                                      className="flex-1 btn-slate !py-1.5 text-[10px] !text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 cursor-pointer active:scale-95 transition-transform">
                                       Reddet
                                     </button>
                                     <button
                                       onClick={() => handleOfferResponse(msg.id, "accept")}
-                                      className="flex-1 btn-gradient !bg-emerald-500 !border-emerald-400 !py-1.5 text-[10px]">
+                                      className="flex-1 btn-gradient !bg-emerald-500 !border-emerald-400 !py-1.5 text-[10px] hover:scale-[1.02] cursor-pointer active:scale-95 transition-transform shadow-lg shadow-emerald-500/20">
                                       Kabul Et
                                     </button>
                                   </div>
                                 )
                               )
                             ) : msg.offer_status === "accepted" ? (
-                              // 🎯 YENİ: KABUL EDİLEN TEKLİF VE HEMEN ÖDE BUTONU
                               <div className="flex flex-col gap-2 w-full mt-2">
-                                <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20">
+                                <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 cursor-default">
                                   ✅ Teklif Kabul Edildi
                                 </div>
                                 {isMe && (
                                   <button
                                     onClick={() => handlePayOffer(msg)}
-                                    className="btn-gradient w-full !bg-emerald-500 !border-emerald-400 !py-2 text-[11px] hover:scale-105 shadow-lg shadow-emerald-500/20">
+                                    className="btn-gradient w-full !bg-emerald-500 !border-emerald-400 !py-2 text-[11px] hover:scale-105 active:scale-95 transition-transform shadow-lg shadow-emerald-500/30 cursor-pointer">
                                     💳 Hemen Öde ve Kirala
                                   </button>
                                 )}
                               </div>
                             ) : (
-                              <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20">
+                              <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20 cursor-default">
                                 ❌ Teklif Reddedildi
                               </div>
                             )}
 
                             <div
-                              className={`text-[9px] mt-2 font-mono flex items-center gap-1.5 opacity-70 ${isMe ? "justify-end text-blue-200" : "justify-start text-slate-400"}`}>
+                              className={`text-[9px] mt-2 font-mono flex items-center gap-1.5 opacity-70 cursor-default ${isMe ? "justify-end text-blue-200" : "justify-start text-slate-400"}`}>
                               <span>{formatMessageTime(msg.created_at)}</span>
                             </div>
                           </div>
@@ -410,7 +407,6 @@ const Chat = () => {
                       );
                     }
 
-                    // NORMAL MESAJ BALONLARI
                     return (
                       <motion.div
                         key={msg.id}
@@ -418,7 +414,7 @@ const Chat = () => {
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         className={`flex flex-col max-w-[75%] ${isMe ? "self-end items-end" : "self-start items-start"}`}>
                         <div
-                          className={`px-4 py-2.5 rounded-2xl text-sm font-medium leading-relaxed shadow-sm border relative group ${
+                          className={`px-4 py-2.5 rounded-2xl text-sm font-medium leading-relaxed shadow-sm border relative group cursor-default hover:opacity-90 transition-opacity ${
                             isMe
                               ? "bg-gradient-to-tr from-blue-600 via-blue-600 to-indigo-600 text-white rounded-br-none border-blue-500/20"
                               : "bg-[#334155]/80 text-slate-200 rounded-bl-none border-[#475569]/40 backdrop-blur-sm"
@@ -436,20 +432,21 @@ const Chat = () => {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* MESAJ YAZMA ALANI */}
               <form onSubmit={handleSendMessage} className="p-4 border-t border-[#475569]/40 bg-[#0f172a]/30 flex gap-2.5 items-center">
                 <input
                   type="text"
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   placeholder="Mesajınızı yazın..."
-                  className="cyber-input flex-1 !rounded-full !px-5 !py-3 border-[#475569]/50 shadow-inner focus:border-blue-500"
+                  className="cyber-input flex-1 !rounded-full !px-5 !py-3 border-[#475569]/50 shadow-inner hover:border-blue-500/50 focus:border-blue-500 transition-colors"
                 />
                 <button
                   type="submit"
                   disabled={!newMessage.trim()}
                   className={`btn-gradient !rounded-full !px-6 !py-3 h-full flex items-center justify-center font-bold tracking-wider uppercase transition-all shrink-0 ${
-                    !newMessage.trim() ? "opacity-30 cursor-not-allowed shadow-none" : "cursor-pointer hover:scale-105 active:scale-95"
+                    !newMessage.trim()
+                      ? "opacity-30 cursor-not-allowed shadow-none"
+                      : "cursor-pointer hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20"
                   }`}>
                   Gönder 🚀
                 </button>
@@ -460,11 +457,11 @@ const Chat = () => {
               <motion.div
                 animate={{ y: [0, -6, 0] }}
                 transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
-                className="text-5xl mb-4">
+                className="text-5xl mb-4 cursor-default">
                 💬
               </motion.div>
-              <h3 className="text-slate-300 font-bold mb-1">Mesajlarınız</h3>
-              <p className="font-mono text-xs tracking-widest text-slate-400 uppercase text-center max-w-sm">
+              <h3 className="text-slate-300 font-bold mb-1 cursor-default">Mesajlarınız</h3>
+              <p className="font-mono text-xs tracking-widest text-slate-400 uppercase text-center max-w-sm cursor-default">
                 Sohbet detaylarını görmek ve mesajlaşmak için sol panelden bir ilan seçin.
               </p>
             </div>

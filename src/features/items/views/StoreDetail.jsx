@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { itemApi } from "../services/itemApi";
 import ItemCard from "../components/ItemCard";
 
@@ -33,11 +33,11 @@ const StoreDetail = () => {
 
   if (loading)
     return (
-      <div className="w-full relative flex items-center justify-center font-mono text-xs tracking-widest text-slate-400 animate-pulse">
+      <div className="w-full relative flex items-center justify-center font-mono text-xs tracking-widest text-slate-400 animate-pulse pt-20">
         MAĞAZA PROFİLİ YÜKLENİYOR...
       </div>
     );
-  if (!store) return <div className="w-full relative text-center pt-20">Mağaza bulunamadı.</div>;
+  if (!store) return <div className="w-full relative text-center pt-20 text-slate-500 font-mono">Mağaza bulunamadı.</div>;
 
   const activeListings = store.active_listings || [];
   const rentedListings = store.rented_listings || [];
@@ -47,14 +47,18 @@ const StoreDetail = () => {
     <div className="w-full relative p-6 lg:p-12 selection:bg-blue-500/30">
       <div className="max-w-6xl mx-auto space-y-8 relative z-10">
         {/* HERO KART */}
-        <div className="cyber-card p-8 relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="cyber-card p-8 relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6 hover:border-slate-600/50 transition-colors">
           <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 blur-3xl rounded-full pointer-events-none" />
 
           <div className="flex items-center gap-5 flex-col md:flex-row text-center md:text-left z-10">
             {/* AVATAR KISMI */}
-            <div className="w-20 h-20 rounded-2xl bg-slate-800 flex items-center justify-center shadow-xl border border-slate-700/50 overflow-hidden font-black text-2xl text-slate-300 uppercase">
+            <div className="w-20 h-20 rounded-2xl bg-slate-800 flex items-center justify-center shadow-xl border border-slate-700/50 overflow-hidden font-black text-2xl text-slate-300 uppercase cursor-default">
               {store.profile_image ? (
-                <img src={store.profile_image} alt={store.username} className="w-full h-full object-cover" />
+                <img
+                  src={store.profile_image}
+                  alt={store.username}
+                  className="w-full h-full object-cover hover:scale-110 transition-transform"
+                />
               ) : store.show_name ? (
                 store.first_name?.[0]
               ) : (
@@ -62,21 +66,18 @@ const StoreDetail = () => {
               )}
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 cursor-default">
               <span className="text-[10px] text-emerald-400 font-bold tracking-widest uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
                 ✔️ KAYITLI KULLANICI
               </span>
 
-              {/* DİNAMİK İSİM GÖSTERİMİ */}
               <h1 className="text-2xl font-black tracking-tight text-slate-100">
                 {store.show_name ? `${store.first_name} ${store.last_name}` : `@${store.username}`}
               </h1>
 
-              {/* Eğer show_name false ise, username yukarıya geçtiği için h3 boş kalır, kalabalık yapmaz */}
               {store.show_name && <h3 className="text-sm font-medium text-slate-400">@{store.username}</h3>}
 
-              {/* DİNAMİK PUANLAMA */}
-              <div className="flex items-center justify-center md:justify-start gap-1.5 text-xs text-amber-400 font-semibold bg-slate-900/50 px-3 py-1 rounded-lg w-fit mx-auto md:mx-0 mt-2">
+              <div className="flex items-center justify-center md:justify-start gap-1.5 text-xs text-amber-400 font-semibold bg-slate-900/50 px-3 py-1 rounded-lg w-fit mx-auto md:mx-0 mt-2 hover:bg-slate-900/80 transition-colors">
                 ⭐ {store.rating > 0 ? store.rating : "Yeni"}
                 <span className="text-slate-400 font-normal">({store.review_count || storeReviews.length} Değerlendirme)</span>
               </div>
@@ -84,12 +85,11 @@ const StoreDetail = () => {
           </div>
         </div>
 
-        {/* TABS KISMI (Değişiklik yok) */}
         <div className="space-y-6">
           <div className="flex gap-2 border-b border-slate-700/50 pb-px">
             <button
               onClick={() => setActiveTab("active")}
-              className={`pb-3 text-xs font-bold tracking-wider uppercase transition-all relative px-2 ${activeTab === "active" ? "text-blue-400" : "text-slate-500 hover:text-slate-300"}`}>
+              className={`pb-3 text-xs font-bold tracking-wider uppercase transition-all relative px-2 cursor-pointer hover:scale-105 active:scale-95 ${activeTab === "active" ? "text-blue-400" : "text-slate-500 hover:text-slate-300"}`}>
               Aktif İlanlar ({activeListings.length})
               {activeTab === "active" && (
                 <motion.div layoutId="activeTabLine" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 rounded-full" />
@@ -97,7 +97,7 @@ const StoreDetail = () => {
             </button>
             <button
               onClick={() => setActiveTab("rented")}
-              className={`pb-3 text-xs font-bold tracking-wider uppercase transition-all relative px-2 ${activeTab === "rented" ? "text-blue-400" : "text-slate-500 hover:text-slate-300"}`}>
+              className={`pb-3 text-xs font-bold tracking-wider uppercase transition-all relative px-2 cursor-pointer hover:scale-105 active:scale-95 ${activeTab === "rented" ? "text-blue-400" : "text-slate-500 hover:text-slate-300"}`}>
               Şu Anda Kirada ({rentedListings.length})
               {activeTab === "rented" && (
                 <motion.div layoutId="activeTabLine" className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 rounded-full" />
@@ -114,15 +114,15 @@ const StoreDetail = () => {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs font-mono text-slate-500 py-6">Kullanıcının henüz aktif bir ilanı bulunmuyor.</p>
+                <p className="text-xs font-mono text-slate-500 py-6 cursor-default">Kullanıcının henüz aktif bir ilanı bulunmuyor.</p>
               )
             ) : rentedListings.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 opacity-75">
                 {rentedListings.map((item) => (
-                  <div key={item.id} className="relative group">
+                  <div key={item.id} className="relative group cursor-pointer hover:opacity-100 transition-opacity">
                     <ItemCard item={item} />
                     <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[2px] rounded-2xl flex items-center justify-center pointer-events-none z-20">
-                      <span className="bg-slate-900/90 text-amber-400 border border-amber-500/30 text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-xl">
+                      <span className="bg-slate-900/90 text-amber-400 border border-amber-500/30 text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-xl shadow-lg">
                         🔒 KİRADA
                       </span>
                     </div>
@@ -130,19 +130,20 @@ const StoreDetail = () => {
                 ))}
               </div>
             ) : (
-              <p className="text-xs font-mono text-slate-500 py-6">Kullanıcının şu anda kirada olan bir ürünü bulunmuyor.</p>
+              <p className="text-xs font-mono text-slate-500 py-6 cursor-default">Kullanıcının şu anda kirada olan bir ürünü bulunmuyor.</p>
             )}
           </div>
         </div>
 
-        {/* YORUMLAR (GİZLİLİK KURALLARINA GÖRE) */}
+        {/* YORUMLAR */}
         <div className="border-t border-slate-700/50 pt-8 space-y-5">
-          <h2 className="text-sm font-bold tracking-widest text-slate-300 uppercase font-mono">💬 Kullanıcı Değerlendirmeleri</h2>
+          <h2 className="text-sm font-bold tracking-widest text-slate-300 uppercase font-mono cursor-default">
+            💬 Kullanıcı Değerlendirmeleri
+          </h2>
 
           {storeReviews.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {storeReviews.map((review) => {
-                // YORUM YAPANIN İSMİ GÖZÜKSÜN MÜ?
                 const reviewerName = review.reviewer_show_name
                   ? `${review.reviewer_first_name} ${review.reviewer_last_name?.[0]}.`
                   : `@${review.reviewer_username}`;
@@ -150,8 +151,8 @@ const StoreDetail = () => {
                 const reviewerInitial = review.reviewer_show_name ? review.reviewer_first_name?.[0] : review.reviewer_username?.[0];
 
                 return (
-                  <div key={review.id} className="cyber-card p-5 space-y-3 !bg-slate-800/20">
-                    <div className="flex items-center justify-between">
+                  <div key={review.id} className="cyber-card p-5 space-y-3 !bg-slate-800/20 hover:!bg-slate-800/40 transition-colors">
+                    <div className="flex items-center justify-between cursor-default">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-lg bg-slate-700 flex items-center justify-center text-[11px] font-bold text-slate-200 uppercase shadow-inner border border-slate-600/50">
                           {reviewerInitial || "K"}
@@ -161,12 +162,14 @@ const StoreDetail = () => {
                       <span className="text-[10px] tracking-widest">{"⭐".repeat(review.rating)}</span>
                     </div>
 
-                    <p className="text-xs text-slate-300 leading-relaxed italic pl-9">"{review.comment || "Sadece puanlama yapıldı."}"</p>
+                    <p className="text-xs text-slate-300 leading-relaxed italic pl-9 cursor-default">
+                      "{review.comment || "Sadece puanlama yapıldı."}"
+                    </p>
 
                     <div className="mt-3 pl-9">
                       <div
                         onClick={() => navigate(`/listings/${review.item}`)}
-                        className="inline-flex items-center gap-2 bg-slate-900/60 hover:bg-slate-900/90 border border-slate-700/50 rounded-lg p-1.5 cursor-pointer transition-colors">
+                        className="inline-flex items-center gap-2 bg-slate-900/60 hover:bg-slate-900 border border-slate-700/50 rounded-lg p-1.5 cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-sm">
                         <img
                           src={review.item_image || "https://via.placeholder.com/40"}
                           alt="item"
@@ -174,7 +177,7 @@ const StoreDetail = () => {
                         />
                         <div className="flex flex-col pr-2">
                           <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Kiralanan Ürün</span>
-                          <span className="text-[10px] text-blue-400 font-semibold truncate max-w-[150px]">
+                          <span className="text-[10px] text-blue-400 font-semibold truncate max-w-[150px] group-hover:text-blue-300">
                             {review.item_title || "Ürün İlanı"}
                           </span>
                         </div>
@@ -185,7 +188,7 @@ const StoreDetail = () => {
               })}
             </div>
           ) : (
-            <div className="cyber-card p-8 text-center text-slate-500 border-dashed text-xs">
+            <div className="cyber-card p-8 text-center text-slate-500 border-dashed text-xs cursor-default">
               Kullanıcı henüz bir değerlendirme almamış. İlk kiralayan ve değerlendiren siz olun!
             </div>
           )}
