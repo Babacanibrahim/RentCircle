@@ -89,7 +89,8 @@ class ItemSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'owner', 'owner_name', 'category', 'category_detail', 
             'title', 'description', 'price_per_day', 
-            'city', 'district', 'region', 'latitude', 'longitude', 
+            'city', 'district', 'region',
+            'full_address', 'latitude', 'longitude', 
             'is_available', 'images', 'created_at', 'updated_at',
             'is_favorite', 'next_available_date', 'is_currently_rented',
             'reviews', 'owner_show_name', 'owner_first_name', 'owner_last_name', 

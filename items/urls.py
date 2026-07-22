@@ -19,7 +19,7 @@ urlpatterns = [
 
     path('notifications/', notification_list, name='notifications'),
     path('notifications/<int:pk>/', notification_delete, name='notification_delete'),
-    path('api/items/notifications/clear_all/', notification_clear_all),
+    path('notifications/clear_all/', notification_clear_all),
     
     # Router her zaman en altta kalmalı
     path('', include(router.urls)),
