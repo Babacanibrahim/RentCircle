@@ -57,7 +57,10 @@ export const itemApi = {
   
   getConversations: async () => { const res = await axiosInstance.get("items/conversations/", getAuthHeader()); return res.data; },
   getMessages: async (conversationId) => { const res = await axiosInstance.get(`items/conversations/${conversationId}/messages/`, getAuthHeader()); return res.data; },
-  sendMessage: async (conversationId, content) => { const res = await axiosInstance.post(`items/conversations/${conversationId}/send_message/`, { content }, getAuthHeader()); return res.data; },
+  sendMessage: async (conversationId, payload) => { 
+    const res = await axiosInstance.post(`items/conversations/${conversationId}/send_message/`, payload, getAuthHeader()); 
+    return res.data; 
+  },
   startConversation: async (itemId, renterId, ownerId) => {
     const res = await axiosInstance.post("items/conversations/", { item: itemId, renter: renterId, owner: ownerId }, getAuthHeader());
     return res.data;
@@ -81,17 +84,20 @@ export const itemApi = {
   },
 
   checkConversationExists: async (itemId) => {
-    const response = await axiosInstance.get(`/items/conversations/check_existing/?item_id=${itemId}`);
+    // 🎯 Baştaki / kaldırıldı ve getAuthHeader eklendi
+    const response = await axiosInstance.get(`items/conversations/check_existing/?item_id=${itemId}`, getAuthHeader());
     return response.data;
   },
 
   sendDirectMessage: async (payload) => {
-    const response = await axiosInstance.post(`/items/conversations/send_direct_message/`, payload);
+    // 🎯 Baştaki / kaldırıldı ve getAuthHeader eklendi
+    const response = await axiosInstance.post(`items/conversations/send_direct_message/`, payload, getAuthHeader());
     return response.data;
   },
 
   respondToOffer: async (messageId, action) => {
-    const response = await axiosInstance.post(`/items/conversations/respond_offer/`, { message_id: messageId, action });
+    // 🎯 Baştaki / kaldırıldı ve getAuthHeader eklendi
+    const response = await axiosInstance.post(`items/conversations/respond_offer/`, { message_id: messageId, action }, getAuthHeader());
     return response.data;
   },
 
