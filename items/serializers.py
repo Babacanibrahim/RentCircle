@@ -223,7 +223,8 @@ class MessageSerializer(serializers.ModelSerializer):
         model = Message
         fields = [
             'id', 'conversation', 'sender', 'sender_name', 'content', 'is_read', 'created_at',
-            'is_offer', 'offer_price', 'offer_start_date', 'offer_end_date', 'offer_status'
+            'is_offer', 'offer_price', 'offer_start_date', 'offer_end_date', 'offer_status',
+            'is_location_share', 'location_lat', 'location_lon', 'location_address'
         ]
         read_only_fields = ['sender', 'is_read', 'created_at']
 

@@ -341,16 +341,29 @@ class ConversationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def send_message(self, request, pk=None):
         conversation = self.get_object()
-        content = request.data.get('content')
+        content = request.data.get('content', '')
         
-        if not content:
+        # Konum Verileri
+        is_location_share = request.data.get('is_location_share', False)
+        location_lat = request.data.get('location_lat')
+        location_lon = request.data.get('location_lon')
+        location_address = request.data.get('location_address')
+        offer_status = request.data.get('offer_status')
+        
+        if not content and not is_location_share:
             return Response({"error": "Mesaj içeriği boş olamaz."}, status=status.HTTP_400_BAD_REQUEST)
             
         message = Message.objects.create(
             conversation=conversation,
             sender=request.user,
-            content=content
+            content=content,
+            is_location_share=is_location_share,
+            location_lat=location_lat,
+            location_lon=location_lon,
+            location_address=location_address,
+            offer_status=offer_status
         )
+        
         conversation.updated_at = message.created_at
         conversation.save()
         
@@ -372,6 +385,13 @@ class ConversationViewSet(viewsets.ModelViewSet):
         item_id = request.data.get('item_id')
         content = request.data.get('content', '')
         
+        # Konum Verileri
+        is_location_share = request.data.get('is_location_share', False)
+        location_lat = request.data.get('location_lat')
+        location_lon = request.data.get('location_lon')
+        location_address = request.data.get('location_address')
+        offer_status = request.data.get('offer_status')
+        
         # Teklif Verileri
         is_offer = request.data.get('is_offer', False)
         offer_price = request.data.get('offer_price')
@@ -384,59 +404,65 @@ class ConversationViewSet(viewsets.ModelViewSet):
         if item.owner == user:
             return Response({"error": "Kendi ilanınıza mesaj atamazsınız."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Konuşma var mı bak, yoksa ŞİMDİ YARAT (Kullanıcı ilk defa yazdıktan sonra yaratılır)
+        # 1. Konuşma var mı bak, yoksa ŞİMDİ YARAT (Buraya sadece Conversation alanları girer!)
         conversation, created = Conversation.objects.get_or_create(
             item=item,
             renter=user,
             owner=item.owner
         )
 
-        with transaction.atomic():
-            message = Message.objects.create(
-                conversation=conversation,
-                sender=user,
-                content=content,
-                is_offer=is_offer,
-                offer_price=Decimal(str(offer_price)) if is_offer else None,
-                offer_start_date=datetime.strptime(start_date, "%Y-%m-%d").date() if is_offer else None,
-                offer_end_date=datetime.strptime(end_date, "%Y-%m-%d").date() if is_offer else None,
-                offer_status='pending' if is_offer else None
-            )
-            conversation.updated_at = message.created_at
-            conversation.save()
+        # 2. Mesajı Yarat (Konum ve Teklif verileri BURAYA eklenmeli!)
+        message = Message.objects.create(
+            conversation=conversation,
+            sender=user,
+            content=content,
+            is_offer=is_offer,
+            offer_price=offer_price,
+            offer_start_date=start_date,
+            offer_end_date=end_date,
+            offer_status='pending' if is_offer else offer_status, # Teklifse pending, konumsa gelen status
+            is_location_share=is_location_share,
+            location_lat=location_lat,
+            location_lon=location_lon,
+            location_address=location_address
+        )
 
-        serializer = MessageSerializer(message, context={'request': request})
-        return Response({"conversation_id": conversation.id, "message": serializer.data}, status=status.HTTP_201_CREATED)
+        # Sohbetin güncellenme tarihini yenile
+        conversation.updated_at = message.created_at
+        conversation.save()
+
+        # Cevap olarak conversation_id'yi dönüyoruz ki frontend bu ID ile sohbete girebilsin
+        return Response({
+            "message": "Mesaj başarıyla gönderildi.",
+            "conversation_id": conversation.id
+        }, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'])
     def respond_offer(self, request):
-        """Satıcının gelen teklifi Kabul veya Reddetmesini sağlar."""
+        """Karşı tarafın gönderdiği teklifi veya konumu Kabul/Reddet işlemi yapar"""
         message_id = request.data.get('message_id')
-        action_type = request.data.get('action') # 'accept' veya 'reject'
-        
-        message = get_object_or_404(Message, id=message_id, is_offer=True)
-        
-        if message.conversation.owner != request.user:
-            return Response({"error": "Sadece satıcı teklife yanıt verebilir."}, status=status.HTTP_403_FORBIDDEN)
-            
-        if action_type == 'accept':
-            message.offer_status = 'accepted'
-            # Sistemden otomatik bilgilendirme mesajı atalım
-            Message.objects.create(
-                conversation=message.conversation,
-                sender=request.user,
-                content=f"Sistem: Satıcı, {message.offer_price} ₺ tutarındaki teklifinizi kabul etti. Ödeme adımına geçebilirsiniz."
-            )
-        elif action_type == 'reject':
-            message.offer_status = 'rejected'
-            Message.objects.create(
-                conversation=message.conversation,
-                sender=request.user,
-                content=f"Sistem: Satıcı, {message.offer_price} ₺ tutarındaki teklifinizi reddetti."
-            )
-        
+        action_type = request.data.get('action')  # 'accept' veya 'reject'
+
+        if not message_id or action_type not in ['accept', 'reject']:
+            return Response({"error": "Geçersiz veya eksik parametre."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Mesajı veritabanından bul (import etmediysen en üste 'from .models import Message' ekleyebilirsin)
+        message = get_object_or_404(Message, id=message_id)
+
+        # Güvenlik Duvarı: Kullanıcı kendi gönderdiği teklifi kabul/red edemez!
+        if message.sender == request.user:
+            return Response({"error": "Kendi teklifinize/konumunuza yanıt veremezsiniz."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Durumu güncelle
+        message.offer_status = 'accepted' if action_type == 'accept' else 'rejected'
         message.save()
-        return Response({"message": "Teklif durumu güncellendi.", "status": message.offer_status})
+
+        # Sohbetin de güncellenme tarihini yenileyelim ki listelerde üste çıksın
+        conversation = message.conversation
+        conversation.updated_at = message.updated_at if hasattr(message, 'updated_at') else message.created_at
+        conversation.save()
+
+        return Response({"message": "İşlem başarıyla gerçekleşti.", "offer_status": message.offer_status}, status=status.HTTP_200_OK)
     
 class ReviewViewSet(viewsets.ModelViewSet):
     queryset = Review.objects.all()
