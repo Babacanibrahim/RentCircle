@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions, status, serializers
+from rest_framework import viewsets, permissions, status, serializers, filters
 from rest_framework.decorators import APIView, action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -25,6 +25,9 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
 
 class ItemViewSet(viewsets.ModelViewSet):
     serializer_class = ItemSerializer
+
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['title', 'description', 'category__name']
 
     def get_queryset(self):
         # 1. Süresi dolan banları kaldır
@@ -348,9 +351,15 @@ class ConversationViewSet(viewsets.ModelViewSet):
         location_lat = request.data.get('location_lat')
         location_lon = request.data.get('location_lon')
         location_address = request.data.get('location_address')
-        offer_status = request.data.get('offer_status')
         
-        if not content and not is_location_share:
+        # 🎯 YENİ: Teklif Verilerini de Yakalıyoruz
+        is_offer = request.data.get('is_offer', False)
+        offer_price = request.data.get('offer_price')
+        offer_start_date = request.data.get('start_date')
+        offer_end_date = request.data.get('end_date')
+        
+        # Eğer mesaj sadece metinse içerik boş olamaz (Konum veya teklifse içerik boş olabilir)
+        if not content and not is_location_share and not is_offer:
             return Response({"error": "Mesaj içeriği boş olamaz."}, status=status.HTTP_400_BAD_REQUEST)
             
         message = Message.objects.create(
@@ -361,7 +370,11 @@ class ConversationViewSet(viewsets.ModelViewSet):
             location_lat=location_lat,
             location_lon=location_lon,
             location_address=location_address,
-            offer_status=offer_status
+            is_offer=is_offer,
+            offer_price=offer_price,
+            offer_start_date=offer_start_date,
+            offer_end_date=offer_end_date,
+            offer_status='pending' if is_offer else request.data.get('offer_status')
         )
         
         conversation.updated_at = message.created_at

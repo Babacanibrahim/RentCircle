@@ -70,7 +70,6 @@ class ItemSerializer(serializers.ModelSerializer):
     owner_name = serializers.ReadOnlyField(source='owner.get_full_name')
     images = ItemImageSerializer(many=True, read_only=True)
     
-    # DÜZELTİLDİ: Çift tanımlanan owner_username temizlendi
     owner_username = serializers.ReadOnlyField(source='owner.username')
     owner_show_name = serializers.ReadOnlyField(source='owner.show_name')
     owner_first_name = serializers.ReadOnlyField(source='owner.first_name')
@@ -83,9 +82,13 @@ class ItemSerializer(serializers.ModelSerializer):
     is_currently_rented = serializers.SerializerMethodField()
     owner_rating = serializers.SerializerMethodField()
     owner_review_count = serializers.SerializerMethodField()
+    
+    # 🎯 YENİ EKLENEN KISIM: Dolu Tarihleri Frontend'e Gönderiyoruz
+    booked_dates = serializers.SerializerMethodField()
 
     class Meta:
         model = Item
+        # 🎯 DİKKAT: 'booked_dates' alanını fields listesine ekledik!
         fields = [
             'id', 'owner', 'owner_name', 'category', 'category_detail', 
             'title', 'description', 'price_per_day', 
@@ -94,7 +97,8 @@ class ItemSerializer(serializers.ModelSerializer):
             'is_available', 'images', 'created_at', 'updated_at',
             'is_favorite', 'next_available_date', 'is_currently_rented',
             'reviews', 'owner_show_name', 'owner_first_name', 'owner_last_name', 
-            'owner_username', 'owner_rating', 'owner_review_count'
+            'owner_username', 'owner_rating', 'owner_review_count',
+            'booked_dates' 
         ]
         read_only_fields = ['owner']
    
@@ -120,7 +124,6 @@ class ItemSerializer(serializers.ModelSerializer):
         return not obj.is_available
 
     def get_next_available_date(self, obj):
-
         last_booking = obj.bookings.filter(status='active').aggregate(Max('end_date'))
         end_date = last_booking['end_date__max']
         
@@ -130,6 +133,18 @@ class ItemSerializer(serializers.ModelSerializer):
                 return today
             return end_date
         return None
+
+    # 🎯 YENİ EKLENEN KISIM: Hangi günler kiralıysa o günleri liste olarak dön
+    def get_booked_dates(self, obj):
+        # 'approved' (Onaylanmış ama başlamamış) ve 'active' (Şu an kullanan) kiralamalar
+        active_bookings = obj.bookings.filter(status__in=['approved', 'active'])
+        return [
+            {
+                "start": str(booking.start_date),
+                "end": str(booking.end_date)
+            }
+            for booking in active_bookings
+        ]
 
 
 class StoreDetailSerializer(serializers.ModelSerializer):
