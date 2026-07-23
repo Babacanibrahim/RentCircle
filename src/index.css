@@ -4,18 +4,18 @@
   /* Sayfaların Loş ve Göz Dinlendiren Arka Planı */
   .page-layout {
     min-height: 100vh;
-    background-color: #1e293b; /* Yumuşak Gece Mavisi */
-    color: #f8fafc; /* Net Beyaz Metinler */
+    background-color: #1e293b;
+    color: #f8fafc;
     position: relative;
     overflow-x: hidden;
   }
 
   /* Hafif Yarı Saydam Premium Kartlar */
   .cyber-card {
-    background-color: rgba(51, 65, 85, 0.6); /* Slate-700'ün hafif transparan hali */
+    background-color: rgba(51, 65, 85, 0.6);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(71, 85, 105, 0.5); /* Slate-600 transparan */
+    border: 1px solid rgba(71, 85, 105, 0.5);
     border-radius: 1rem;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
     transition: all 0.3s ease;
@@ -24,7 +24,7 @@
   /* Loş Forma Uygun Input Alanları */
   .cyber-input {
     width: 100%;
-    background-color: #0f172a; /* Input içleri biraz daha koyu kalarak derinlik katar */
+    background-color: #0f172a;
     border: 1px solid #475569;
     border-radius: 0.75rem;
     padding: 0.625rem;
@@ -68,7 +68,7 @@
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
     border-radius: 0.75rem;
-    background-color: #334155; /* Slate-700 */
+    background-color: #334155;
     border: 1px solid #475569;
     color: #cbd5e1;
     font-weight: 700;
@@ -77,11 +77,66 @@
   }
 
   .btn-slate:hover {
-    background-color: #475569; /* Slate-600 */
+    background-color: #475569;
     color: #f8fafc;
   }
 
   .btn-slate:active {
     transform: scale(0.95);
   }
+}
+
+/* 🎯 LAYER DIŞI: Kütüphane Stillerini Ezmek İçin Standart CSS Kullanıyoruz (Tailwind değil) */
+.react-datepicker {
+  background-color: #0f172a !important;
+  border: 1px solid rgba(71, 85, 105, 0.5) !important;
+  border-radius: 1rem !important;
+  font-family: inherit !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: center;
+}
+
+.react-datepicker__month-container {
+  width: 100% !important;
+}
+
+.react-datepicker__header {
+  background-color: rgba(30, 41, 59, 0.8) !important;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5) !important;
+}
+
+.react-datepicker__current-month, .react-datepicker-time__header, .react-datepicker-year-header {
+  color: #f8fafc !important;
+  font-weight: 800 !important;
+}
+
+.react-datepicker__day-name {
+  color: #94a3b8 !important;
+  font-weight: 700 !important;
+}
+
+.react-datepicker__day {
+  color: #cbd5e1 !important;
+  border-radius: 0.5rem !important;
+  transition: all 0.2s !important;
+}
+
+.react-datepicker__day:hover {
+  background-color: #334155 !important;
+  color: white !important;
+}
+
+.react-datepicker__day--selected, .react-datepicker__day--in-selecting-range, .react-datepicker__day--in-range {
+  background-color: #3b82f6 !important;
+  color: white !important;
+  font-weight: 700 !important;
+}
+
+.react-datepicker__day--disabled {
+  color: #f87171 !important; /* Rose-400 (Kırmızımsı) */
+  background-color: rgba(225, 29, 72, 0.1) !important; /* Hafif kırmızı arka plan */
+  text-decoration: line-through !important;
+  cursor: not-allowed !important;
+  opacity: 0.8 !important;
 }

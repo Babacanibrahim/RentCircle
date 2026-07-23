@@ -24,10 +24,11 @@ import ForgotPassword from "./features/auth/views/ForgotPassword";
 import WalletDashboard from "./features/items/views/WalletDashboard";
 
 function App() {
+  const isAuthenticated = !!(localStorage.getItem("access_token") || sessionStorage.getItem("access_token"));
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />} />
 
         {/* --- LAYOUT DIŞINDA KALANLAR (NAVBAR VE FOOTER OLMAYACAK) --- */}
         <Route

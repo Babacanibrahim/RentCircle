@@ -1,16 +1,15 @@
 import React from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 
 const PrivateRoute = ({ children }) => {
-  // 🎯 KRİTİK DEĞİŞİKLİK: İki depolama alanına da bakıyoruz
   const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+  const location = useLocation(); // Hangi sayfaya girmeye çalışıyor?
 
-  // Eğer token hiçbirinde yoksa (giriş yapılmamışsa) kullanıcıyı login sayfasına postala
   if (!token) {
-    return <Navigate to="/login" replace />;
+    // 🎯 DÜZELTME: Kullanıcıyı login'e atarken, "state" içinde asıl gitmek istediği adresi taşı!
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Token varsa sayfaya giriş izni ver
   return children;
 };
 

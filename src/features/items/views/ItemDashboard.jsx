@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { itemApi } from "../services/itemApi";
 import ItemCard from "../components/ItemCard";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { toast } from "../../../utils/alerts"; // 🎯 YENİ: Hata bildirimleri için
+import { toast } from "../../../utils/alerts";
 
 const ItemDashboard = () => {
   const navigate = useNavigate();
   const { locationFilter } = useOutletContext() || {};
+
+  // 🎯 YENİ: URL'den search parametresini yakalıyoruz
+  const [searchParams] = useSearchParams();
+  const searchWord = searchParams.get("search");
 
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -21,6 +25,8 @@ const ItemDashboard = () => {
   const [availableOnly, setAvailableOnly] = useState(false);
 
   useEffect(() => {
+    let isMounted = true; // 🎯 YENİ: Yarış durumunu (Race Condition) engelleme bayrağı
+
     const fetchDashboardData = async () => {
       setLoading(true);
       try {
@@ -29,18 +35,31 @@ const ItemDashboard = () => {
           district: locationFilter?.district || "",
         };
 
+        if (searchWord) {
+          filters.search = searchWord;
+        }
+
         const [itemsData, categoriesData] = await Promise.all([itemApi.getListings(filters), itemApi.getCategories()]);
 
-        setItems(itemsData);
-        setCategories(categoriesData);
+        // 🎯 YENİ: Eğer yeni bir istek atılmadıysa (hala güncelsek) state'e yaz
+        if (isMounted) {
+          setItems(itemsData.results || itemsData);
+          setCategories(categoriesData);
+        }
       } catch (error) {
-        console.error("Veriler çekilirken hata oluştu:", error);
+        if (isMounted) console.error("Veriler çekilirken hata oluştu:", error);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
+
     fetchDashboardData();
-  }, [locationFilter]);
+
+    // 🎯 YENİ: Component kapanırsa veya useEffect TEKRAR tetiklenirse, önceki isteği iptal et/yok say
+    return () => {
+      isMounted = false;
+    };
+  }, [locationFilter, searchWord]);
 
   const handleCreateListingClick = () => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
@@ -90,7 +109,7 @@ const ItemDashboard = () => {
             <h1 className="text-2xl font-black tracking-tight text-slate-100">Güvenli Paylaşım Ekosistemi</h1>
             <p className="text-xs text-slate-400 mt-1">
               📍 {locationFilter?.city || "Tüm Türkiye"} {locationFilter?.district ? `- ${locationFilter.district}` : ""} bölgesindeki
-              ilanlar listeleniyor.
+              ilanlar listeleniyor. {searchWord && <span className="font-bold text-blue-400 ml-1">("{searchWord}" aranıyor)</span>}
             </p>
           </div>
           <button
@@ -222,7 +241,14 @@ const ItemDashboard = () => {
           <div className="cyber-card text-center py-20 bg-transparent border-dashed border-slate-700">
             <span className="text-4xl mb-4 block">🏜️</span>
             <p className="text-sm font-bold text-slate-300">Bu kriterlere uygun ilan bulunamadı.</p>
-            <p className="text-xs text-slate-500 mt-2 font-mono">Filtreleri esnetmeyi veya farklı bir bölge seçmeyi deneyin.</p>
+            <p className="text-xs text-slate-500 mt-2 font-mono">Filtreleri esnetmeyi veya farklı bir arama yapmayı deneyin.</p>
+            {searchWord && (
+              <button
+                onClick={() => navigate("/dashboard")}
+                className="mt-4 text-xs font-bold text-blue-400 hover:text-blue-300 underline cursor-pointer">
+                Tüm İlanları Göster
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">

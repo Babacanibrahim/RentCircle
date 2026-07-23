@@ -4,13 +4,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { itemApi } from "../services/itemApi";
 import { toast, cyberConfirm } from "../../../utils/alerts";
 
-// 🎯 YENİ HARİTA İMPORTLARI
+// HARİTA İMPORTLARI
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import axios from "axios";
 
-// Leaflet Varsayılan İkon Ayarı
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -26,7 +25,6 @@ const ChangeMapCenter = ({ center, zoom }) => {
   return null;
 };
 
-// Haritaya tıklanınca adresi çeken akıllı bileşen
 const MapClickHandler = ({ setMapPosition, setLocationAddress, setModalMapCenter }) => {
   useMapEvents({
     click: async (e) => {
@@ -60,24 +58,57 @@ const Chat = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
-  const messagesEndRef = useRef(null);
 
-  // 🎯 YENİ LOKASYON STATE'LERİ
+  // 🎯 YENİ: Sadece sohbet kutusunu kaydırmak için referans
+  const chatContainerRef = useRef(null);
+
+  // 🎯 YENİ: Sayfa zıplamasını engelleyen akıllı kaydırma fonksiyonu
+  const scrollToBottom = (smooth = true) => {
+    setTimeout(() => {
+      if (chatContainerRef.current) {
+        chatContainerRef.current.scrollTo({
+          top: chatContainerRef.current.scrollHeight,
+          behavior: smooth ? "smooth" : "auto", // İlk açılışta anında (auto), yeni mesajda yumuşak (smooth)
+        });
+      }
+    }, 100);
+  };
+
+  // LOKASYON STATE'LERİ
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
-  const [modalMapCenter, setModalMapCenter] = useState([37.7765, 29.0864]); // Varsayılan Denizli
+  const [modalMapCenter, setModalMapCenter] = useState([37.7765, 29.0864]);
   const [mapPosition, setMapPosition] = useState(null);
   const [locationAddress, setLocationAddress] = useState("");
   const [locationNote, setLocationNote] = useState("");
 
-  // 🎯 YENİ ARAMA STATE'LERİ
+  // ARAMA STATE'LERİ
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Arama çubuğu temizlendiğinde sonuçları da temizle
+  // TEKLİF STATE'LERİ
+  const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
+  const [offerPrice, setOfferPrice] = useState("");
+  const [offerDates, setOfferDates] = useState({ start_date: "", end_date: "" });
+  const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
+
   useEffect(() => {
     if (!searchQuery.trim()) setSearchResults([]);
   }, [searchQuery]);
+
+  useEffect(() => {
+    if (offerDates.start_date && offerDates.end_date && activeChat?.item_price) {
+      const start = new Date(offerDates.start_date);
+      const end = new Date(offerDates.end_date);
+
+      if (end >= start) {
+        const diffTime = Math.abs(end - start);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+        const calculatedTotal = diffDays * parseFloat(activeChat.item_price);
+        setOfferPrice(calculatedTotal.toString());
+      }
+    }
+  }, [offerDates.start_date, offerDates.end_date, activeChat]);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
@@ -140,10 +171,9 @@ const Chat = () => {
             const fetchedMessages = data.results ? data.results : data;
             setMessages(fetchedMessages);
             if (fetchedMessages.length > currentMsgCount) {
+              const isFirstLoad = currentMsgCount === 0;
               currentMsgCount = fetchedMessages.length;
-              setTimeout(() => {
-                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-              }, 100);
+              scrollToBottom(!isFirstLoad); // İlk açılışta anında (sıçrama yapmaz), yeni mesajda yumuşak kayar
             }
           })
           .catch((err) => console.error("Mesajlar güncellenemedi:", err));
@@ -175,11 +205,7 @@ const Chat = () => {
       } else {
         const sentMessage = await itemApi.sendMessage(activeChat.id, { content: messageContent });
         setMessages((prev) => [...prev, sentMessage]);
-
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        }, 100);
-
+        scrollToBottom(true);
         const updatedChats = await itemApi.getConversations();
         setConversations(updatedChats.results ? updatedChats.results : updatedChats);
       }
@@ -189,13 +215,11 @@ const Chat = () => {
     }
   };
 
-  // 🎯 YENİ: MEKAN / ADRES ARAMA FONKSİYONU
   const handleSearchLocation = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
     setIsSearching(true);
     try {
-      // Sadece Türkiye içindeki sonuçları getirmesi için countrycodes=tr eklendi
       const res = await axios.get(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=tr&limit=5`,
       );
@@ -210,17 +234,13 @@ const Chat = () => {
     }
   };
 
-  // 🎯 YENİ: ARAMA SONUCUNDAN MEKAN SEÇME
   const handleSelectSearchResult = (result) => {
     const lat = parseFloat(result.lat);
     const lon = parseFloat(result.lon);
-
     setMapPosition([lat, lon]);
     setModalMapCenter([lat, lon]);
-
-    // Adres alanına mekanın kısa adını veya tam adresini yaz
     setLocationAddress(result.name || result.display_name.split(",")[0]);
-    setSearchResults([]); // Listeyi kapat
+    setSearchResults([]);
   };
 
   const handleSendLocation = async () => {
@@ -233,7 +253,7 @@ const Chat = () => {
       location_lon: mapPosition[1],
       location_address: locationAddress || "Haritadan seçilen konum",
       is_offer: false,
-      offer_status: "pending", // 🎯 YENİ EKLENDİ: Karşı tarafın onayı beklenecek
+      offer_status: "pending",
     };
 
     try {
@@ -244,12 +264,9 @@ const Chat = () => {
       } else {
         const sentMessage = await itemApi.sendMessage(activeChat.id, payload);
         setMessages((prev) => [...prev, sentMessage]);
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        }, 100);
+        scrollToBottom(true);
       }
 
-      // Modalı Kapat ve State'leri Temizle
       setIsLocationModalOpen(false);
       setMapPosition(null);
       setLocationAddress("");
@@ -259,6 +276,61 @@ const Chat = () => {
       toast.fire({ icon: "success", title: "Buluşma noktası karşı tarafa iletildi!" });
     } catch (error) {
       toast.fire({ icon: "error", title: "Konum paylaşılamadı." });
+    }
+  };
+
+  const openOfferModal = (specificOffer = null) => {
+    if (specificOffer) {
+      setOfferDates({ start_date: specificOffer.start, end_date: specificOffer.end });
+      setOfferPrice(specificOffer.price);
+    } else {
+      const lastOffer = [...messages].reverse().find((m) => m.is_offer);
+      if (lastOffer) {
+        setOfferDates({ start_date: lastOffer.offer_start_date, end_date: lastOffer.offer_end_date });
+        setOfferPrice(lastOffer.offer_price);
+      } else {
+        setOfferDates({ start_date: "", end_date: "" });
+        setOfferPrice("");
+      }
+    }
+    setIsOfferModalOpen(true);
+  };
+
+  const handleSendOffer = async (e) => {
+    e.preventDefault();
+    if (!offerPrice || !offerDates.start_date || !offerDates.end_date) {
+      return toast.fire({ icon: "warning", title: "Lütfen tarihleri ve teklif tutarınızı eksiksiz girin." });
+    }
+
+    setIsSubmittingOffer(true);
+    try {
+      const payload = {
+        content: `Size yeni bir fiyat teklifim var: ${formatReadableDate(offerDates.start_date)} - ${formatReadableDate(offerDates.end_date)} arası toplam ${offerPrice} ₺`,
+        is_offer: true,
+        offer_price: offerPrice,
+        start_date: offerDates.start_date,
+        end_date: offerDates.end_date,
+        offer_status: "pending",
+      };
+
+      if (activeChat.isNew) {
+        payload.item_id = activeChat.item_id;
+        const result = await itemApi.sendDirectMessage(payload);
+        navigate(`/chat?conv_id=${result.conversation_id}`, { replace: true });
+      } else {
+        const sentMessage = await itemApi.sendMessage(activeChat.id, payload);
+        setMessages((prev) => [...prev, sentMessage]);
+        scrollToBottom(true);
+      }
+
+      setIsOfferModalOpen(false);
+      setOfferDates({ start_date: "", end_date: "" });
+      setOfferPrice("");
+      toast.fire({ icon: "success", title: "Teklifiniz karşı tarafa iletildi!" });
+    } catch (error) {
+      toast.fire({ icon: "error", title: "Teklif gönderilirken bir hata oluştu." });
+    } finally {
+      setIsSubmittingOffer(false);
     }
   };
 
@@ -314,6 +386,12 @@ const Chat = () => {
     if (!dateString) return "";
     const date = new Date(dateString);
     return `${date.toLocaleDateString("tr-TR", { day: "numeric", month: "long" })} • ${date.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const formatReadableDate = (dateString) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" });
   };
 
   const getPartnerInfo = (chat) => {
@@ -385,9 +463,11 @@ const Chat = () => {
                       <div className="text-[10px] text-blue-400 font-medium truncate mb-1">{partnerInfo.name}</div>
                       <div className="flex justify-between items-center gap-2">
                         <p className={`text-[11px] truncate ${hasUnread ? "text-slate-200 font-bold" : "text-slate-400"}`}>
-                          {chat.last_message?.is_location_share
-                            ? "📍 Konum paylaştı"
-                            : chat.last_message?.content || "İlk mesajı sen gönder..."}
+                          {chat.last_message?.is_offer
+                            ? "🤝 Yeni teklif var"
+                            : chat.last_message?.is_location_share
+                              ? "📍 Konum paylaştı"
+                              : chat.last_message?.content || "İlk mesajı sen gönder..."}
                         </p>
                       </div>
                     </div>
@@ -454,58 +534,63 @@ const Chat = () => {
                 </button>
               </div>
 
-              {/* MESAJLAŞMA ALANI */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin flex flex-col bg-[#0f172a]/15">
+              {/* 🎯 YENİ: MESAJLAŞMA ALANI (Sayfa Zıplamasını Engelleyen Kutu) */}
+              <div
+                ref={chatContainerRef}
+                className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin flex flex-col bg-[#0f172a]/15 relative">
                 {messages.length === 0 ? (
                   <div className="flex-1 flex items-center justify-center flex-col text-slate-500">
                     <span className="text-3xl mb-2 animate-bounce">👋</span>
                     <p className="text-xs font-mono text-center">
-                      {activeChat.isNew
-                        ? "Bu satıcıya henüz mesaj göndermediniz. Sorularınızı sorabilir veya teklif verebilirsiniz."
-                        : "Henüz mesaj yok. İlk adımı sen at!"}
+                      {activeChat.isNew ? "Sohbete başlamak için bir mesaj yazın veya teklif verin." : "Henüz mesaj yok. İlk adımı sen at!"}
                     </p>
                   </div>
                 ) : (
                   messages.map((msg) => {
                     const isMe = String(msg.sender).toLowerCase() === currentUserId;
 
-                    // 1️⃣ TEKLİF KARTI
+                    // 1️⃣ 🎯 YENİ ŞIK TEKLİF KARTI (Kutu İçi Kutu Formatı)
                     if (msg.is_offer) {
                       return (
                         <motion.div
                           key={msg.id}
                           initial={{ opacity: 0, y: 5 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className={`flex flex-col w-full max-w-[85%] ${isMe ? "self-end items-end" : "self-start items-start"}`}>
+                          className={`flex flex-col w-full max-w-[85%] sm:max-w-[380px] ${isMe ? "self-end items-end" : "self-start items-start"}`}>
                           <div
-                            className={`p-4 rounded-2xl shadow-md border transition-all ${msg.offer_status === "accepted" ? "bg-emerald-900/20 border-emerald-500/30" : msg.offer_status === "rejected" ? "bg-rose-900/20 border-rose-500/30" : "bg-amber-900/20 border-amber-500/30"}`}>
+                            className={`p-4 rounded-2xl shadow-md border transition-all w-full ${msg.offer_status === "accepted" ? "bg-emerald-900/20 border-emerald-500/30" : msg.offer_status === "rejected" ? "bg-rose-900/20 border-rose-500/30" : "bg-amber-900/20 border-amber-500/30"}`}>
                             <div className="flex items-center gap-2 mb-3">
                               <span className="text-lg">🤝</span>
-                              <span className="text-xs font-black tracking-widest uppercase text-slate-200">ÖZEL TEKLİF KARTI</span>
+                              <span className="text-xs font-black tracking-widest uppercase text-slate-200">
+                                {isMe ? "GÖNDERDİĞİN TEKLİF" : "YENİ TEKLİF GELDİ"}
+                              </span>
                             </div>
 
-                            <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 space-y-2 mb-3 cursor-default hover:bg-slate-900/70 transition-colors">
-                              <div className="flex justify-between text-xs">
-                                <span className="text-slate-400">Tarih Aralığı:</span>
-                                <span className="font-mono text-slate-200">
-                                  {msg.offer_start_date} <span className="text-slate-500 mx-1">→</span> {msg.offer_end_date}
+                            <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 mb-3 cursor-default hover:bg-slate-900/70 transition-colors">
+                              <div className="flex flex-col gap-1.5 text-center">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Kiralama Tarihleri</span>
+                                <span className="font-bold text-slate-200 text-[11px] bg-slate-800/50 py-1.5 rounded-lg border border-slate-700/50">
+                                  {formatReadableDate(msg.offer_start_date)} <span className="text-slate-500 mx-1">→</span>{" "}
+                                  {formatReadableDate(msg.offer_end_date)}
                                 </span>
                               </div>
-                              <div className="flex justify-between text-xs">
-                                <span className="text-slate-400">Önerilen Fiyat:</span>
-                                <span className="font-black text-amber-400">₺{msg.offer_price}</span>
+
+                              <div className="flex justify-between items-center border-t border-slate-700/50 pt-2.5 mt-2.5">
+                                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Önerilen Fiyat:</span>
+                                <span className="font-black text-amber-400 text-sm">₺{msg.offer_price}</span>
                               </div>
                             </div>
 
                             <p className="text-xs text-slate-300 italic mb-4">"{msg.content}"</p>
 
+                            {/* DURUMLARA GÖRE BUTON DİZİLİMİ */}
                             {msg.offer_status === "pending" ? (
                               isMe ? (
                                 <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20 cursor-default">
-                                  ⏳ Satıcıdan yanıt bekleniyor...
+                                  ⏳ Yanıt bekleniyor...
                                 </div>
                               ) : (
-                                partner.isOwner && (
+                                <div className="flex flex-col gap-2 w-full">
                                   <div className="flex gap-2">
                                     <button
                                       onClick={() => handleOfferResponse(msg.id, "reject")}
@@ -518,18 +603,25 @@ const Chat = () => {
                                       Kabul Et
                                     </button>
                                   </div>
-                                )
+                                  <button
+                                    onClick={() =>
+                                      openOfferModal({ start: msg.offer_start_date, end: msg.offer_end_date, price: msg.offer_price })
+                                    }
+                                    className="w-full btn-slate !py-1.5 text-[10px] text-amber-400 border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 hover:border-amber-500/50 cursor-pointer active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-sm">
+                                    💡 Karşı Teklif İlet (Fiyatı Güncelle)
+                                  </button>
+                                </div>
                               )
                             ) : msg.offer_status === "accepted" ? (
                               <div className="flex flex-col gap-2 w-full mt-2">
                                 <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 cursor-default">
                                   ✅ Teklif Kabul Edildi
                                 </div>
-                                {isMe && (
+                                {!partner.isOwner && (
                                   <button
                                     onClick={() => handlePayOffer(msg)}
                                     className="btn-gradient w-full !bg-emerald-500 !border-emerald-400 !py-2 text-[11px] hover:scale-105 active:scale-95 transition-transform shadow-lg shadow-emerald-500/30 cursor-pointer">
-                                    💳 Hemen Öde ve Kirala
+                                    💳 Kirala ve Öde
                                   </button>
                                 )}
                               </div>
@@ -548,7 +640,7 @@ const Chat = () => {
                       );
                     }
 
-                    // 2️⃣ YENİ: LOKASYON PAYLAŞIM KARTI VE KABUL/RET
+                    // 2️⃣ LOKASYON PAYLAŞIM KARTI
                     if (msg.is_location_share) {
                       return (
                         <motion.div
@@ -560,10 +652,9 @@ const Chat = () => {
                             className={`p-4 rounded-2xl shadow-md border w-full transition-all ${isMe ? "bg-indigo-900/20 border-indigo-500/30" : "bg-slate-800/60 border-slate-600/40"}`}>
                             <div className="flex items-center gap-2 mb-3">
                               <span className="text-lg animate-bounce">📍</span>
-                              <span className="text-xs font-black tracking-widest uppercase text-slate-200">Buluşma Noktası Önerisi</span>
+                              <span className="text-xs font-black tracking-widest uppercase text-slate-200">Buluşma Noktası</span>
                             </div>
 
-                            {/* Sohbet İçi Mini Harita */}
                             {msg.location_lat && msg.location_lon && (
                               <div className="h-32 w-full mt-2 mb-3 rounded-xl overflow-hidden border border-slate-700/50 relative z-0">
                                 <MapContainer
@@ -591,33 +682,32 @@ const Chat = () => {
 
                             <p className="text-xs text-slate-300 italic mb-4">"{msg.content}"</p>
 
-                            {/* 🎯 YENİ: KONUM KABUL / RET DURUMLARI */}
                             {msg.offer_status === "pending" ? (
                               isMe ? (
                                 <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20 cursor-default mb-3">
-                                  ⏳ Karşı tarafın konumu onaylaması bekleniyor...
+                                  ⏳ Karşı tarafın onayı bekleniyor...
                                 </div>
                               ) : (
                                 <div className="flex gap-2 mb-3">
                                   <button
                                     onClick={() => handleOfferResponse(msg.id, "reject")}
                                     className="flex-1 btn-slate !py-2 text-[10px] !text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 cursor-pointer active:scale-95 transition-transform">
-                                    📍 Konumu Reddet
+                                    Reddet
                                   </button>
                                   <button
                                     onClick={() => handleOfferResponse(msg.id, "accept")}
                                     className="flex-1 btn-gradient !bg-emerald-500 !border-emerald-400 !py-2 text-[10px] cursor-pointer active:scale-95 transition-transform shadow-lg shadow-emerald-500/20">
-                                    ✅ Uygun, Kabul Et
+                                    Kabul Et
                                   </button>
                                 </div>
                               )
                             ) : msg.offer_status === "accepted" ? (
                               <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 cursor-default mb-3">
-                                ✅ Buluşma Noktası İki Tarafça Onaylandı
+                                ✅ Buluşma Noktası Onaylandı
                               </div>
                             ) : msg.offer_status === "rejected" ? (
                               <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20 cursor-default mb-3">
-                                ❌ Konum Reddedildi, Yeni Öneri Bekleniyor
+                                ❌ Konum Reddedildi
                               </div>
                             ) : null}
 
@@ -657,10 +747,9 @@ const Chat = () => {
                     );
                   })
                 )}
-                <div ref={messagesEndRef} />
               </div>
 
-              {/* MESAJ YAZMA ALANI VE KONUM BUTONU */}
+              {/* MESAJ YAZMA ALANI VE BUTONLAR */}
               <form onSubmit={handleSendMessage} className="p-4 border-t border-[#475569]/40 bg-[#0f172a]/30 flex gap-2.5 items-center">
                 {/* 📍 KONUM EKLE BUTONU */}
                 <button
@@ -669,6 +758,15 @@ const Chat = () => {
                   className="w-12 h-12 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-xl hover:bg-slate-700 hover:border-blue-400 transition-colors cursor-pointer active:scale-90 flex-shrink-0 shadow-sm"
                   title="Buluşma Noktası Öner">
                   📍
+                </button>
+
+                {/* 🤝 YENİ TEKLİF EKLE BUTONU */}
+                <button
+                  type="button"
+                  onClick={() => openOfferModal()}
+                  className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/40 flex items-center justify-center text-xl hover:bg-amber-500/20 hover:border-amber-400 transition-colors cursor-pointer active:scale-90 flex-shrink-0 shadow-sm"
+                  title="Yeni Teklif Öner">
+                  🤝
                 </button>
 
                 <input
@@ -697,14 +795,109 @@ const Chat = () => {
               </motion.div>
               <h3 className="text-slate-300 font-bold mb-1 cursor-default">Mesajlarınız</h3>
               <p className="font-mono text-xs tracking-widest text-slate-400 uppercase text-center max-w-sm cursor-default">
-                Sohbet detaylarını görmek ve mesajlaşmak için sol panelden bir ilan seçin.
+                Sohbet detaylarını görmek ve pazarlık yapmak için sol panelden bir ilan seçin.
               </p>
             </div>
           )}
         </div>
       </div>
 
-      {/* 🎯 YENİ: HARİTA ÜZERİNDEN KONUM VE MEKAN ARAMA MODALI */}
+      {/* 🎯 TEKLİF VER / DÜZENLE MODALI */}
+      <AnimatePresence>
+        {isOfferModalOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="cyber-card p-6 w-full max-w-sm border border-amber-500/30 shadow-2xl shadow-amber-500/10">
+              <h3 className="text-lg font-black text-slate-100 mb-1 cursor-default">🤝 Teklif İlet</h3>
+              <p className="text-[10px] text-slate-400 mb-6 cursor-default">
+                Tarihleri ve önermek istediğiniz tutarı girin. Satıcı onaylarsa anında ödeme yapabilirsiniz.
+              </p>
+
+              <form onSubmit={handleSendOffer} className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 cursor-default">Başlangıç</label>
+                    <input
+                      type="date"
+                      required
+                      min={new Date().toISOString().split("T")[0]}
+                      value={offerDates.start_date}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setOfferDates({ ...offerDates, start_date: val, end_date: "" });
+                      }}
+                      className="cyber-input text-xs cursor-pointer hover:border-amber-500/50 transition-colors focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 cursor-default">Bitiş</label>
+                    <input
+                      type="date"
+                      required
+                      disabled={!offerDates.start_date}
+                      min={offerDates.start_date}
+                      value={offerDates.end_date}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setOfferDates({ ...offerDates, end_date: val });
+
+                        // Sadece bitiş tarihi yeni seçildiğinde otomatik fiyat çıkar
+                        if (offerDates.start_date && val && activeChat?.item_price) {
+                          const start = new Date(offerDates.start_date);
+                          const end = new Date(val);
+                          if (end >= start) {
+                            const diffDays = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)) + 1;
+                            setOfferPrice((diffDays * parseFloat(activeChat.item_price)).toString());
+                          }
+                        }
+                      }}
+                      className="cyber-input text-xs cursor-pointer disabled:opacity-40 hover:border-amber-500/50 transition-colors focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-black text-slate-400 font-mono block cursor-default">
+                    Teklif Edilen Toplam Tutar (₺)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    placeholder="Örn: 500"
+                    value={offerPrice}
+                    onChange={(e) => setOfferPrice(e.target.value)}
+                    className="cyber-input w-full text-base font-bold hover:border-amber-500/50 transition-colors focus:border-amber-500"
+                  />
+                  <p className="text-[9px] text-slate-500 text-right mt-1">
+                    * Fiyat otomatik hesaplanabilir, ancak dilediğiniz gibi değiştirebilirsiniz.
+                  </p>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsOfferModalOpen(false)}
+                    className="btn-slate flex-1 cursor-pointer hover:bg-slate-700 active:scale-95 transition-all">
+                    İptal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingOffer}
+                    className="btn-gradient flex-1 !bg-amber-500 !border-amber-400 hover:scale-105 active:scale-95 transition-transform disabled:opacity-50 cursor-pointer shadow-lg shadow-amber-500/20">
+                    {isSubmittingOffer ? "Gönderiliyor..." : "Teklifi Gönder"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* LOKASYON MODALI */}
       <AnimatePresence>
         {isLocationModalOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -722,14 +915,13 @@ const Chat = () => {
                 </button>
               </div>
 
-              {/* 🎯 YENİ: AKILLI ARAMA ÇUBUĞU */}
               <div className="w-full relative shrink-0 mb-4 z-[1001]">
                 <form onSubmit={handleSearchLocation} className="flex gap-2">
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Mekan, cadde veya işletme ara... (Örn: Pamukkale Üniversitesi)"
+                    placeholder="Mekan, cadde veya işletme ara..."
                     className="cyber-input flex-1 text-xs py-3 hover:border-blue-500/50 transition-colors"
                   />
                   <button
@@ -740,14 +932,9 @@ const Chat = () => {
                   </button>
                 </form>
 
-                {/* Arama Sonuçları Dropdown */}
                 <AnimatePresence>
                   {searchResults.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -5 }}
-                      className="absolute top-full left-0 right-0 mt-2 bg-[#1e293b] border border-[#475569]/80 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
+                    <motion.div className="absolute top-full left-0 right-0 mt-2 bg-[#1e293b] border border-[#475569]/80 rounded-xl shadow-2xl max-h-48 overflow-y-auto">
                       {searchResults.map((res, i) => (
                         <div
                           key={i}
@@ -762,7 +949,6 @@ const Chat = () => {
                 </AnimatePresence>
               </div>
 
-              {/* HARİTA ALANI */}
               <div className="flex-1 w-full bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 mb-4 relative z-0">
                 <MapContainer center={modalMapCenter} zoom={13} className="w-full h-full">
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -774,12 +960,8 @@ const Chat = () => {
                   />
                   {mapPosition && <Marker position={mapPosition} />}
                 </MapContainer>
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/90 text-slate-200 text-[10px] font-bold px-4 py-2 rounded-full border border-slate-700/50 shadow-lg pointer-events-none">
-                  Arama yapın veya haritaya tıklayın
-                </div>
               </div>
 
-              {/* NOT VE GÖNDER BÖLÜMÜ */}
               <div className="space-y-3 shrink-0">
                 <div className="space-y-1">
                   <label className="text-[10px] uppercase font-black text-slate-400 font-mono block cursor-default">Seçilen Adres</label>
@@ -788,7 +970,6 @@ const Chat = () => {
                     value={locationAddress}
                     onChange={(e) => setLocationAddress(e.target.value)}
                     className="cyber-input w-full text-xs bg-slate-900/50 hover:border-blue-500/50 transition-colors"
-                    placeholder="Haritadan seçin veya manuel yazın"
                   />
                 </div>
                 <div className="space-y-1">
@@ -800,7 +981,6 @@ const Chat = () => {
                     value={locationNote}
                     onChange={(e) => setLocationNote(e.target.value)}
                     className="cyber-input w-full text-xs hover:border-blue-500/50 transition-colors"
-                    placeholder="Örn: Kafenin önünde bekliyor olacağım."
                   />
                 </div>
 

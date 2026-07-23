@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { authApi } from "../services/authApi";
-import { toast } from "../../../utils/alerts"; // 🎯 YENİ
+import { toast } from "../../../utils/alerts";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -12,13 +12,13 @@ const Login = () => {
   const [password, setPassword] = useState("");
 
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false); // UI için durabilir, istersen kaldırabilirsin
 
   useEffect(() => {
     const isActivated = searchParams.get("activated");
     if (isActivated === "true") {
       toast.fire({ icon: "success", title: "Hesabınız başarıyla aktifleştirildi, giriş yapabilirsiniz." });
-      setSearchParams({}); // Bildirimi verip URL'yi temizliyoruz
+      setSearchParams({});
     } else if (isActivated === "false") {
       toast.fire({ icon: "error", title: "Aktivasyon linki geçersiz veya süresi dolmuş." });
       setSearchParams({});
@@ -37,18 +37,17 @@ const Login = () => {
     try {
       const data = await authApi.login(payload);
 
+      // 1. Önce eski kalıntıları temizle (Hem local hem session)
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
       sessionStorage.removeItem("access_token");
       sessionStorage.removeItem("refresh_token");
 
-      if (rememberMe) {
-        localStorage.setItem("access_token", data.access);
-        localStorage.setItem("refresh_token", data.refresh);
-      } else {
-        sessionStorage.setItem("access_token", data.access);
-        sessionStorage.setItem("refresh_token", data.refresh);
-      }
+      // 2. 🎯 YENİ: Sekmeler arası senkronizasyon için HER ZAMAN localStorage kullan!
+      // Gizli sekme veya farklı tarayıcılar zaten kendi izole localStorage'larına sahip oldukları için
+      // oralarda oturum kapalı görünecektir (Tam istediğin gibi).
+      localStorage.setItem("access_token", data.access);
+      localStorage.setItem("refresh_token", data.refresh);
 
       toast.fire({ icon: "success", title: "Giriş başarılı! Yönlendiriliyorsunuz..." });
 

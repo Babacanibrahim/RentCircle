@@ -7,6 +7,11 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { toast, cyberConfirm } from "../../../utils/alerts";
 
+// 🎯 YENİ: Takvim Kütüphaneleri
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import { parseISO } from "date-fns";
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
@@ -21,7 +26,10 @@ const ItemDetail = () => {
   const [loading, setLoading] = useState(true);
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
-  const [bookingDates, setBookingDates] = useState({ start_date: "", end_date: "" });
+
+  // 🎯 YENİ: Takvim State'leri
+  const [dateRange, setDateRange] = useState([null, null]);
+  const [startDate, endDate] = dateRange;
 
   const [previewPrice, setPreviewPrice] = useState({ base: 0, deposit: 0, total: 0 });
   const [isFavorite, setIsFavorite] = useState(false);
@@ -29,6 +37,7 @@ const ItemDetail = () => {
 
   const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
   const [offerPrice, setOfferPrice] = useState("");
+  // Teklif Modalındaki tarihler takvim dışı (manuel) tutuldu
   const [offerDates, setOfferDates] = useState({ start_date: "", end_date: "" });
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
 
@@ -60,11 +69,9 @@ const ItemDetail = () => {
   }, [id]);
 
   useEffect(() => {
-    if (bookingDates.start_date && bookingDates.end_date && item) {
-      const start = new Date(bookingDates.start_date);
-      const end = new Date(bookingDates.end_date);
-      const diffTime = Math.abs(end - start);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    if (startDate && endDate && item) {
+      const diffTime = Math.abs(endDate - startDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 güne dahil
 
       const basePrice = diffDays * parseFloat(item.price_per_day);
       const depositAmount = basePrice * 0.15;
@@ -77,7 +84,25 @@ const ItemDetail = () => {
     } else {
       setPreviewPrice({ base: 0, deposit: 0, total: 0 });
     }
-  }, [bookingDates, item]);
+  }, [startDate, endDate, item]);
+
+  // 🎯 YENİ: Teklif tarihlerine göre otomatik fiyat hesaplama
+  useEffect(() => {
+    if (offerDates.start_date && offerDates.end_date && item?.price_per_day) {
+      const start = new Date(offerDates.start_date);
+      const end = new Date(offerDates.end_date);
+
+      // Bitiş tarihi, başlangıçtan büyük veya eşitse hesapla
+      if (end >= start) {
+        const diffTime = Math.abs(end - start);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 gün bugünü de dahil eder
+        const calculatedTotal = diffDays * parseFloat(item.price_per_day);
+
+        // Fiyatı state'e yazıyoruz (Kullanıcı dilerse inputtan silip değiştirebilir)
+        setOfferPrice(calculatedTotal.toString());
+      }
+    }
+  }, [offerDates.start_date, offerDates.end_date, item]);
 
   const nextImage = () => {
     if (!item?.images || item.images.length === 0) return;
@@ -87,12 +112,6 @@ const ItemDetail = () => {
   const prevImage = () => {
     if (!item?.images || item.images.length === 0) return;
     setCurrentImgIndex((prev) => (prev - 1 + item.images.length) % item.images.length);
-  };
-
-  const formatNextAvailableDate = (dateString) => {
-    if (!dateString) return "Hemen Müsait";
-    const date = new Date(dateString);
-    return date.toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" });
   };
 
   const handleFavoriteToggle = async () => {
@@ -173,8 +192,7 @@ const ItemDetail = () => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
 
     if (!token) return toast.fire({ icon: "info", title: "Rezervasyon yapabilmek için lütfen önce giriş yapın." });
-    if (!bookingDates.start_date || !bookingDates.end_date)
-      return toast.fire({ icon: "warning", title: "Lütfen kiralama tarihlerini seçin." });
+    if (!startDate || !endDate) return toast.fire({ icon: "warning", title: "Lütfen takvimden kiralama tarihlerini seçin." });
 
     const result = await cyberConfirm.fire({
       title: "Kiralamayı Onayla",
@@ -188,9 +206,13 @@ const ItemDetail = () => {
     if (!result.isConfirmed) return;
     toast.fire({ icon: "info", title: "💳 Cüzdan bakiyenizden ödeme alınıyor, lütfen bekleyin..." });
 
+    // JS Date objelerini YYYY-MM-DD formatına çeviriyoruz
+    const formattedStart = startDate.toISOString().split("T")[0];
+    const formattedEnd = endDate.toISOString().split("T")[0];
+
     const bookingData = {
-      start_date: bookingDates.start_date,
-      end_date: bookingDates.end_date,
+      start_date: formattedStart,
+      end_date: formattedEnd,
       total_price: previewPrice.base,
     };
 
@@ -227,12 +249,13 @@ const ItemDetail = () => {
   if (!item) return <div className="w-full relative text-center pt-20 text-slate-500 font-mono">Ürün bulunamadı.</div>;
 
   const activeImage = item.images?.[currentImgIndex]?.image || "";
-  const today = new Date();
-  const todayStr =
-    today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
 
-  const minStartDate =
-    !item.is_available && item.next_available_date && item.next_available_date > todayStr ? item.next_available_date : todayStr;
+  // 🎯 YENİ: Backend'den gelen dolu (rezerve) tarihleri takvime tanıtıyoruz
+  const excludedIntervals =
+    item?.booked_dates?.map((range) => ({
+      start: parseISO(range.start),
+      end: parseISO(range.end),
+    })) || [];
 
   return (
     <div className="w-full relative selection:bg-blue-500/30">
@@ -287,13 +310,12 @@ const ItemDetail = () => {
                 </div>
               </div>
 
-              {/* SOL KISIMDAKİ HARİTA BÖLÜMÜ (ItemDetail.jsx içinde ilgili yeri bununla değiştir) */}
+              {/* HARİTA BÖLÜMÜ */}
               <div className="space-y-4 pt-4 border-t border-slate-700/50">
                 <div className="flex items-center justify-between cursor-default">
                   <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">🗺️ Konum Bilgisi</h2>
                 </div>
 
-                {/* 🎯 YENİ: Açık Adres Yazı Alanı */}
                 {(item.region || item.full_address) && (
                   <div className="bg-slate-900/50 border border-slate-700/50 p-3 rounded-xl flex items-start gap-3">
                     <span className="text-lg mt-0.5">📍</span>
@@ -339,10 +361,6 @@ const ItemDetail = () => {
                 <div className="flex items-center justify-between cursor-default">
                   <span className="text-[10px] font-bold tracking-widest text-blue-400 uppercase bg-blue-500/10 px-3 py-1 rounded-lg border border-blue-500/20 hover:bg-blue-500/20 transition-colors">
                     ⚡ {item.category_detail?.name || "Kategori"}
-                  </span>
-                  <span
-                    className={`text-[10px] font-bold tracking-widest uppercase px-3 py-1 rounded-lg border transition-colors ${item.is_available ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20" : "text-amber-400 bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/20"}`}>
-                    {item.is_available ? "● AKTİF İLAN" : "● ŞU AN KİRADA"}
                   </span>
                 </div>
 
@@ -428,45 +446,28 @@ const ItemDetail = () => {
 
               <div className="cyber-card p-6 space-y-4">
                 <h2 className="text-xs font-bold tracking-widest text-slate-300 uppercase font-mono cursor-default">📅 Kiralama Talebi</h2>
-                {!item.is_available && (
-                  <div className="space-y-2 mb-4">
-                    <div className="flex justify-between items-center bg-[#0f172a]/40 p-3 rounded-xl border border-slate-700/50 cursor-default hover:bg-slate-900/40 transition-colors">
-                      <span className="text-xs font-bold text-slate-400">Ürün Durumu: Kirada. En Erken:</span>
-                      <span className="text-xs font-mono font-black text-blue-400">
-                        {formatNextAvailableDate(item.next_available_date)}
-                      </span>
-                    </div>
-                  </div>
-                )}
+
                 <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[11px] text-blue-300 cursor-default hover:bg-blue-500/20 transition-colors">
                   ℹ️ Kiralama süresince ürününüzü korumak adına <strong>%15 depozito (güvence bedeli)</strong> alınmaktadır. Ürün sağlam
                   iade edildiğinde bu tutar iade edilir.
                 </div>
+
                 <form onSubmit={handleRentAndPay} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 cursor-default">Başlangıç</label>
-                      <input
-                        type="date"
-                        required
-                        min={minStartDate}
-                        value={bookingDates.start_date}
-                        onChange={(e) => setBookingDates({ ...bookingDates, start_date: e.target.value, end_date: "" })}
-                        className="cyber-input cursor-pointer hover:border-blue-500/50 transition-colors"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 cursor-default">Bitiş</label>
-                      <input
-                        type="date"
-                        required
-                        disabled={!bookingDates.start_date}
-                        min={bookingDates.start_date}
-                        value={bookingDates.end_date}
-                        onChange={(e) => setBookingDates({ ...bookingDates, end_date: e.target.value })}
-                        className="cyber-input cursor-pointer disabled:opacity-40 hover:border-blue-500/50 transition-colors"
-                      />
-                    </div>
+                  {/* 🎯 YENİ: Akıllı Airbnb Takvimi */}
+                  <div className="w-full bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 shadow-inner">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block cursor-default text-center">
+                      Hemen Kiralamak İçin Tarih Seçin
+                    </label>
+
+                    <DatePicker
+                      selectsRange={true}
+                      startDate={startDate}
+                      endDate={endDate}
+                      onChange={(update) => setDateRange(update)}
+                      excludeDateIntervals={excludedIntervals}
+                      minDate={new Date()}
+                      inline
+                    />
                   </div>
 
                   <AnimatePresence>
@@ -527,7 +528,7 @@ const ItemDetail = () => {
                       <input
                         type="date"
                         required
-                        min={minStartDate}
+                        min={new Date().toISOString().split("T")[0]}
                         value={offerDates.start_date}
                         onChange={(e) => setOfferDates({ ...offerDates, start_date: e.target.value, end_date: "" })}
                         className="cyber-input text-xs cursor-pointer hover:border-amber-500/50 transition-colors focus:border-amber-500"
@@ -582,14 +583,14 @@ const ItemDetail = () => {
           )}
         </AnimatePresence>
 
-        {/* LIGHTBOX AYNEN KALIYOR */}
+        {/* LIGHTBOX */}
         <AnimatePresence>
           {isLightboxOpen && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
+              className="fixed inset-0 z-[60] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
               onClick={() => setIsLightboxOpen(false)}>
               <button
                 onClick={() => setIsLightboxOpen(false)}

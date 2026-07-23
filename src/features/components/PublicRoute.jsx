@@ -1,16 +1,17 @@
 import React from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 
 const PublicRoute = ({ children }) => {
-  // 🎯 KRİTİK DEĞİŞİKLİK: İki depolama alanına da bakıyoruz
   const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+  const location = useLocation();
 
   if (token) {
-    // Kullanıcı zaten giriş yapmışsa direkt dashboard'a yönlendir
-    return <Navigate to="/dashboard" replace />;
+    // 🎯 DÜZELTME: Eğer kullanıcı Login'e gitmeye çalışıyorsa geldiği yere geri yolla,
+    // yoksa standart olarak dashboard'a at.
+    const from = location.state?.from?.pathname || "/dashboard";
+    return <Navigate to={from} replace />;
   }
 
-  // Giriş yapmamışsa sayfayı normal şekilde göster
   return children;
 };
 

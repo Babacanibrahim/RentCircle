@@ -6,11 +6,14 @@ const getAuthHeader = () => {
 };
 
 export const itemApi = {
-  // 🎯 DÜZELTME: Şehir ve İlçe filtrelerini artık Backend'e query parametresi olarak gönderiyoruz!
+
   getListings: async (filters = {}) => { 
     const queryParams = new URLSearchParams();
     if (filters.city) queryParams.append('city', filters.city);
     if (filters.district) queryParams.append('district', filters.district);
+    
+    // 🎯 YENİ: Arama kelimesini backend'e gönderiyoruz
+    if (filters.search) queryParams.append('search', filters.search); 
     
     const queryString = queryParams.toString();
     const url = queryString ? `items/listings/?${queryString}` : "items/listings/";
