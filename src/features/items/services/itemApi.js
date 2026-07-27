@@ -108,4 +108,19 @@ export const itemApi = {
     const response = await axiosInstance.delete('/items/notifications/clear_all/');
     return response.data;
   },
+
+  getMyListings: async () => {
+    const response = await axiosInstance.get('items/listings/my_listings/');
+    return response.data;
+  },
+
+  // 🎯 DÜZELTİLDİ: /items/${id}/ yerine /listings/${id}/ kullanıldı
+  updateListing: async (id, data) => {
+    const response = await axiosInstance.patch(`items/listings/${id}/`, data, {
+      headers: {
+        "Content-Type": data instanceof FormData ? "multipart/form-data" : "application/json",
+      },
+    });
+    return response.data;
+  },
 };

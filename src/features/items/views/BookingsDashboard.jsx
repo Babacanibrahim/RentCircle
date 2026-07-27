@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { itemApi } from "../services/itemApi";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, cyberConfirm } from "../../../utils/alerts";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom"; // 🎯 EKLENDİ: Link importu eklendi
 
 const BookingsDashboard = () => {
   const navigate = useNavigate();
@@ -293,13 +293,21 @@ const BookingsDashboard = () => {
                 key={booking.id}
                 className="cyber-card p-5 border border-slate-700/50 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:bg-slate-800/30 transition-colors">
                 <div className="flex items-center gap-4">
-                  <img
-                    src={booking.item_detail.images?.[0]?.image || "https://via.placeholder.com/80"}
-                    alt="item"
-                    className="w-20 h-20 object-cover rounded-xl border border-slate-700"
-                  />
+                  {/* 🎯 DEĞİŞTİRİLDİ: Resim artık Link (Yeni sekmede açılabilir) */}
+                  <Link to={`/listings/${booking.item_detail.id}`} className="shrink-0">
+                    <img
+                      src={booking.item_detail.images?.[0]?.image || "https://via.placeholder.com/80"}
+                      alt="item"
+                      className="w-20 h-20 object-cover rounded-xl border border-slate-700 hover:border-blue-400 transition-colors"
+                    />
+                  </Link>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-100">{booking.item_detail.title}</h3>
+                    {/* 🎯 DEĞİŞTİRİLDİ: Başlık artık Link (Yeni sekmede açılabilir) */}
+                    <Link to={`/listings/${booking.item_detail.id}`}>
+                      <h3 className="text-sm font-bold text-slate-100 hover:text-blue-400 transition-colors">
+                        {booking.item_detail.title}
+                      </h3>
+                    </Link>
                     <div className="text-xs text-slate-400 mt-1 font-mono">
                       {formatReadableDate(booking.start_date)} <span className="mx-1">→</span> {formatReadableDate(booking.end_date)}
                     </div>

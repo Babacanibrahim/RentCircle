@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom"; // 🎯 EKLENDİ: Link importu eklendi
 import { motion, AnimatePresence } from "framer-motion";
 import { itemApi } from "../services/itemApi";
 import { toast, cyberConfirm } from "../../../utils/alerts";
@@ -491,21 +491,24 @@ const Chat = () => {
               {/* SOHBET ÜST BİLGİ ALANI */}
               <div className="p-4 border-b border-[#475569]/40 flex items-center justify-between bg-[#0f172a]/40 backdrop-blur-md">
                 <div className="flex items-center gap-4">
+                  {/* 🎯 DEĞİŞTİRİLDİ: Resim artık Link (Yeni sekmede açılabilir) */}
                   {activeChat.item_image && (
-                    <img
-                      src={activeChat.item_image}
-                      alt="ilan"
-                      className="w-10 h-10 rounded-md object-cover border border-slate-600/50 cursor-pointer hover:scale-110 transition-transform"
-                      onClick={() => navigate(`/listings/${activeChat.item_id || activeChat.item}`)}
-                    />
+                    <Link to={`/listings/${activeChat.item_id || activeChat.item}`} className="shrink-0 block">
+                      <img
+                        src={activeChat.item_image}
+                        alt="ilan"
+                        className="w-10 h-10 rounded-md object-cover border border-slate-600/50 hover:scale-110 transition-transform"
+                      />
+                    </Link>
                   )}
                   <div>
                     <h3 className="text-sm font-black text-slate-100 tracking-tight flex items-center gap-2">
-                      <span
-                        className="cursor-pointer hover:text-blue-400 transition-colors"
-                        onClick={() => navigate(`/listings/${activeChat.item_id || activeChat.item}`)}>
+                      {/* 🎯 DEĞİŞTİRİLDİ: Başlık artık Link (Yeni sekmede açılabilir) */}
+                      <Link
+                        to={`/listings/${activeChat.item_id || activeChat.item}`}
+                        className="cursor-pointer hover:text-blue-400 transition-colors">
                         {activeChat.item_title}
-                      </span>
+                      </Link>
                       {activeChat.item_price && (
                         <span className="text-xs font-mono text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 rounded cursor-default">
                           ₺{activeChat.item_price}/Gün
@@ -515,11 +518,12 @@ const Chat = () => {
                     <p className="text-[11px] text-slate-400 font-medium mt-1 flex items-center gap-1.5">
                       👤 Konuştuğun Kişi:
                       {!activeChat.isNew ? (
-                        <span
-                          onClick={() => navigate(`/stores/${partner.id}`)}
-                          className="text-blue-400 hover:text-blue-300 font-bold hover:underline cursor-pointer transition-all">
+                        /* 🎯 DEĞİŞTİRİLDİ: Kullanıcı adı artık Link (Yeni sekmede açılabilir) */
+                        <Link
+                          to={`/stores/${partner.id}`}
+                          className="text-blue-400 hover:text-blue-300 font-bold hover:underline transition-all">
                           {partner.name}
-                        </span>
+                        </Link>
                       ) : (
                         <span className="text-slate-300 cursor-default">{partner.name}</span>
                       )}
@@ -527,14 +531,16 @@ const Chat = () => {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => navigate(`/listings/${activeChat.item_id || activeChat.item}`)}
-                  className="btn-slate text-[10px] !py-1.5 !px-3 hover:scale-105 active:scale-95 transition-transform cursor-pointer hover:bg-slate-700">
+
+                {/* 🎯 DEĞİŞTİRİLDİ: İlana Git butonu artık Link (Yeni sekmede açılabilir) */}
+                <Link
+                  to={`/listings/${activeChat.item_id || activeChat.item}`}
+                  className="btn-slate text-[10px] !py-1.5 !px-3 hover:scale-105 active:scale-95 transition-transform hover:bg-slate-700 flex items-center justify-center">
                   İlana Git ↗
-                </button>
+                </Link>
               </div>
 
-              {/* 🎯 YENİ: MESAJLAŞMA ALANI (Sayfa Zıplamasını Engelleyen Kutu) */}
+              {/* MESAJLAŞMA ALANI */}
               <div
                 ref={chatContainerRef}
                 className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin flex flex-col bg-[#0f172a]/15 relative">
@@ -549,7 +555,7 @@ const Chat = () => {
                   messages.map((msg) => {
                     const isMe = String(msg.sender).toLowerCase() === currentUserId;
 
-                    // 1️⃣ 🎯 YENİ ŞIK TEKLİF KARTI (Kutu İçi Kutu Formatı)
+                    // 1️⃣ YENİ ŞIK TEKLİF KARTI (Kutu İçi Kutu Formatı)
                     if (msg.is_offer) {
                       return (
                         <motion.div
@@ -751,7 +757,6 @@ const Chat = () => {
 
               {/* MESAJ YAZMA ALANI VE BUTONLAR */}
               <form onSubmit={handleSendMessage} className="p-4 border-t border-[#475569]/40 bg-[#0f172a]/30 flex gap-2.5 items-center">
-                {/* 📍 KONUM EKLE BUTONU */}
                 <button
                   type="button"
                   onClick={() => setIsLocationModalOpen(true)}
@@ -760,7 +765,6 @@ const Chat = () => {
                   📍
                 </button>
 
-                {/* 🤝 YENİ TEKLİF EKLE BUTONU */}
                 <button
                   type="button"
                   onClick={() => openOfferModal()}

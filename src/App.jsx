@@ -19,6 +19,7 @@ import BookingsDashboard from "./features/items/views/BookingsDashboard";
 import RentalHistory from "./features/items/views/RentalHistory";
 import Profile from "./features/auth/views/Profile";
 import ForgotPassword from "./features/auth/views/ForgotPassword";
+import MyListings from "./features/items/views/MyListings";
 
 // 🎯 YENİ: Cüzdan Sayfası
 import WalletDashboard from "./features/items/views/WalletDashboard";
@@ -93,6 +94,16 @@ function App() {
               </PrivateRoute>
             }
           />
+
+          <Route
+            path="/my-listings"
+            element={
+              <PrivateRoute>
+                <MyListings />
+              </PrivateRoute>
+            }
+          />
+
           <Route
             path="/bookings"
             element={
