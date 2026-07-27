@@ -85,6 +85,7 @@ class ItemSerializer(serializers.ModelSerializer):
     
     # 🎯 YENİ EKLENEN KISIM: Dolu Tarihleri Frontend'e Gönderiyoruz
     booked_dates = serializers.SerializerMethodField()
+    favorites_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Item
@@ -98,7 +99,7 @@ class ItemSerializer(serializers.ModelSerializer):
             'is_favorite', 'next_available_date', 'is_currently_rented',
             'reviews', 'owner_show_name', 'owner_first_name', 'owner_last_name', 
             'owner_username', 'owner_rating', 'owner_review_count',
-            'booked_dates' 
+            'booked_dates', 'views_count', 'favorites_count'
         ]
         read_only_fields = ['owner']
    
@@ -108,6 +109,9 @@ class ItemSerializer(serializers.ModelSerializer):
 
     def get_owner_review_count(self, obj):
         return obj.owner.reviews_received.count()
+
+    def get_favorites_count(self, obj):
+        return obj.favorites.count()
 
     def validate_price_per_day(self, value):
         if value <= 0:
@@ -121,7 +125,7 @@ class ItemSerializer(serializers.ModelSerializer):
         return False
 
     def get_is_currently_rented(self, obj):
-        return not obj.is_available
+        return obj.bookings.filter(status='active').exists()
 
     def get_next_available_date(self, obj):
         last_booking = obj.bookings.filter(status='active').aggregate(Max('end_date'))

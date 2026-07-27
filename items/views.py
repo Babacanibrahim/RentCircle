@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404, redirect
 from django.db.models import Q
 import json
+from django.core.cache import cache
 from datetime import datetime
 import iyzipay
 from django.utils import timezone
@@ -68,6 +69,12 @@ class ItemViewSet(viewsets.ModelViewSet):
             item.favorites.add(user)
             return Response({"is_favorite": True, "message": "Favorilere eklendi."}, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['get'], url_path='my_listings', permission_classes=[IsAuthenticated])
+    def my_listings(self, request):
+        items = Item.objects.filter(owner=request.user).order_by('-created_at')
+        serializer = self.get_serializer(items, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def my_favorites(self, request):
         user = request.user
@@ -85,6 +92,36 @@ class ItemViewSet(viewsets.ModelViewSet):
         if self.action in ['list', 'retrieve', 'store_detail']:
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
+        # 1. Görüntüleyen kişiyi tespit et (Giriş yaptıysa ID, yapmadıysa IP adresi)
+        if request.user.is_authenticated:
+            viewer_identifier = f"user_{request.user.id}"
+        else:
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded_for:
+                ip = x_forwarded_for.split(',')[0]
+            else:
+                ip = request.META.get('REMOTE_ADDR')
+            viewer_identifier = f"ip_{ip}"
+            
+        # 2. Kişiye özel geçici bir "Hafıza Anahtarı" oluştur (Örn: view_item_15_user_3)
+        cache_key = f"view_item_{instance.id}_{viewer_identifier}"
+        
+        # 3. Eğer bu kişi son 24 saat içinde bu ilana bakmadıysa (hafızada yoksa)
+        if not cache.get(cache_key):
+            # Kendi ilanı değilse sayacı artır
+            if not (request.user.is_authenticated and instance.owner == request.user):
+                instance.views_count += 1
+                instance.save(update_fields=['views_count'])
+                
+                # Bu kişiyi 24 saat (86400 saniye) boyunca hafızaya al ki F5 atarsa tekrar artmasın
+                cache.set(cache_key, True, 86400)
+
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         item = serializer.save(owner=self.request.user)

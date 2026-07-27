@@ -31,6 +31,7 @@ class Item(models.Model):
     description = models.TextField()
     price_per_day = models.DecimalField(max_digits=10, decimal_places=2)
     favorites = models.ManyToManyField(User, related_name="favorite_items", blank=True)
+    views_count = models.PositiveIntegerField(default=0, verbose_name="Görüntülenme Sayısı")
     
     city = models.CharField(max_length=100)
     district = models.CharField(max_length=100)
