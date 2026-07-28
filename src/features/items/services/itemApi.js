@@ -11,8 +11,6 @@ export const itemApi = {
     const queryParams = new URLSearchParams();
     if (filters.city) queryParams.append('city', filters.city);
     if (filters.district) queryParams.append('district', filters.district);
-    
-    // 🎯 YENİ: Arama kelimesini backend'e gönderiyoruz
     if (filters.search) queryParams.append('search', filters.search); 
     
     const queryString = queryParams.toString();
@@ -50,9 +48,14 @@ export const itemApi = {
     });
     return response.data;
   },
+
   completeBooking: async (bookingId, formData) => {
-    const response = await axiosInstance.post(`items/bookings/${bookingId}/complete/`, formData, {
-      headers: { "Content-Type": "multipart/form-data", Authorization: `Bearer ${localStorage.getItem("access_token") || sessionStorage.getItem("access_token")}` }
+    // 🎯 DÜZELTİLDİ: "complete/" yerine "complete_booking/" olarak değiştirildi
+    const response = await axiosInstance.post(`items/bookings/${bookingId}/complete_booking/`, formData, {
+      headers: { 
+        "Content-Type": "multipart/form-data", 
+        Authorization: `Bearer ${localStorage.getItem("access_token") || sessionStorage.getItem("access_token")}` 
+      }
     });
     return response.data;
   },
@@ -87,40 +90,53 @@ export const itemApi = {
   },
 
   checkConversationExists: async (itemId) => {
-    // 🎯 Baştaki / kaldırıldı ve getAuthHeader eklendi
     const response = await axiosInstance.get(`items/conversations/check_existing/?item_id=${itemId}`, getAuthHeader());
     return response.data;
   },
 
   sendDirectMessage: async (payload) => {
-    // 🎯 Baştaki / kaldırıldı ve getAuthHeader eklendi
     const response = await axiosInstance.post(`items/conversations/send_direct_message/`, payload, getAuthHeader());
     return response.data;
   },
 
   respondToOffer: async (messageId, action) => {
-    // 🎯 Baştaki / kaldırıldı ve getAuthHeader eklendi
     const response = await axiosInstance.post(`items/conversations/respond_offer/`, { message_id: messageId, action }, getAuthHeader());
     return response.data;
   },
 
   clearAllNotifications: async () => {
-    const response = await axiosInstance.delete('/items/notifications/clear_all/');
+    // 🎯 Baştaki / kaldırıldı, Axios base url formatına uyduruldu
+    const response = await axiosInstance.delete('items/notifications/clear_all/', getAuthHeader());
     return response.data;
   },
 
   getMyListings: async () => {
-    const response = await axiosInstance.get('items/listings/my_listings/');
+    const response = await axiosInstance.get('items/listings/my_listings/', getAuthHeader());
     return response.data;
   },
 
-  // 🎯 DÜZELTİLDİ: /items/${id}/ yerine /listings/${id}/ kullanıldı
   updateListing: async (id, data) => {
     const response = await axiosInstance.patch(`items/listings/${id}/`, data, {
       headers: {
         "Content-Type": data instanceof FormData ? "multipart/form-data" : "application/json",
+        Authorization: `Bearer ${localStorage.getItem("access_token") || sessionStorage.getItem("access_token")}`
       },
     });
     return response.data;
   },
+  
+  approveHandover: async (bookingId) => {
+    const res = await axiosInstance.post(`items/bookings/${bookingId}/approve_handover/`, {}, getAuthHeader());
+    return res.data;
+  },
+
+  approveReturn: async (bookingId) => {
+    const res = await axiosInstance.post(`items/bookings/${bookingId}/approve_return/`, {}, getAuthHeader());
+    return res.data;
+  },
+
+  raiseDispute: async (bookingId, data) => {
+    const res = await axiosInstance.post(`items/bookings/${bookingId}/raise_dispute/`, data, getAuthHeader());
+    return res.data;
+  }
 };

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { itemApi } from "../services/itemApi";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, cyberConfirm } from "../../../utils/alerts";
-import { useNavigate, Link } from "react-router-dom"; // 🎯 EKLENDİ: Link importu eklendi
+import { useNavigate, Link } from "react-router-dom";
 
 const BookingsDashboard = () => {
   const navigate = useNavigate();
@@ -11,11 +11,17 @@ const BookingsDashboard = () => {
   const [activeTab, setActiveTab] = useState("renter");
   const [currentUserId, setCurrentUserId] = useState(null);
 
+  // Modal State'leri
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [pinActionType, setPinActionType] = useState("");
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [pinInput, setPinInput] = useState("");
+  const [notesInput, setNotesInput] = useState(""); // 🎯 YENİ: Yorum/Not alanı
   const [selectedFiles, setSelectedFiles] = useState([]);
+
+  // Anlaşmazlık Modalı State'leri
+  const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
+  const [disputeReason, setDisputeReason] = useState("");
 
   const formatReadableDate = (dateString) => {
     if (!dateString) return "";
@@ -129,6 +135,11 @@ const BookingsDashboard = () => {
     }
   };
 
+  // -----------------------------------------------------------
+  // 🎯 YENİ UÇTAN UCA ONAYLAMA MANTIKLARI
+  // -----------------------------------------------------------
+
+  // SATICI: İlk ödeme gelince kiralama talebini onaylar
   const handleApprove = async (id) => {
     const result = await cyberConfirm.fire({
       title: "Talebi Onaylıyor musunuz?",
@@ -150,10 +161,57 @@ const BookingsDashboard = () => {
     }
   };
 
-  const handleCancel = async (id, isApproved) => {
+  // SATICI: Kiracının gönderdiği teslimat fotoğraflarını inceler ve onaylar (handover_pending -> active)
+  const handleApproveHandover = async (id) => {
+    const result = await cyberConfirm.fire({
+      title: "Teslimatı Onayla",
+      text: "Kiracının yüklediği fotoğrafları ve notu incelediniz mi? Ürününüzü sorunsuz teslim ettiğinizi onaylıyor musunuz?",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "📦 Evet, Teslim Ettim",
+      cancelButtonText: "Vazgeç",
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+      await itemApi.approveHandover(id);
+      toast.fire({ icon: "success", title: "Kiralama resmen başladı!" });
+      fetchBookingsAndOffers();
+    } catch (error) {
+      toast.fire({ icon: "error", title: error.response?.data?.error || "Hata oluştu." });
+    }
+  };
+
+  // KİRACI: Satıcının gönderdiği iade fotoğraflarını inceler ve onaylar (return_pending -> completed)
+  const handleApproveReturn = async (id) => {
+    const result = await cyberConfirm.fire({
+      title: "İadeyi Onayla",
+      text: "Satıcının yüklediği fotoğrafları ve notu incelediniz mi? İade işleminin sorunsuz tamamlandığını onaylıyor musunuz?",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "🔄 Evet, İadeyi Onayla",
+      cancelButtonText: "Vazgeç",
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+      await itemApi.approveReturn(id);
+      toast.fire({ icon: "success", title: "İşlem tamamlandı, depozitonuz iade edilecek!" });
+      fetchBookingsAndOffers();
+    } catch (error) {
+      toast.fire({ icon: "error", title: error.response?.data?.error || "Hata oluştu." });
+    }
+  };
+
+  // -----------------------------------------------------------
+
+  const handleCancel = async (booking) => {
+    const isApproved = booking.status === "approved";
     const warningMsg = isApproved
       ? "⚠️ DİKKAT: Bu kiralama onaylanmış! Başlangıç tarihine 24 saatten az kaldıysa bakiye kesintisi veya ilan yasaklaması uygulanabilir."
-      : "Bu işlemi iptal etmek istediğinize emin misiniz?";
+      : "Bu işlemi (veya kabul edilen teklifi) iptal etmek istediğinize emin misiniz?";
 
     const result = await cyberConfirm.fire({
       title: isApproved ? "Riskli İptal İşlemi" : "İşlemi İptal Et",
@@ -171,7 +229,13 @@ const BookingsDashboard = () => {
     if (!result.isConfirmed) return;
 
     try {
-      await itemApi.cancelBooking(id);
+      if (booking.is_pseudo) {
+        const offerId = booking.id.replace("offer-", "");
+        await itemApi.respondToOffer(offerId, "reject");
+      } else {
+        await itemApi.cancelBooking(booking.id);
+      }
+
       toast.fire({ icon: "success", title: "İşlem başarıyla iptal edildi." });
       fetchBookingsAndOffers();
     } catch (error) {
@@ -183,6 +247,7 @@ const BookingsDashboard = () => {
     setSelectedBookingId(bookingId);
     setPinActionType(actionType);
     setPinInput("");
+    setNotesInput("");
     setSelectedFiles([]);
     setIsPinModalOpen(true);
   };
@@ -208,6 +273,7 @@ const BookingsDashboard = () => {
 
     const formData = new FormData();
     formData.append("pin", pinInput);
+    formData.append("notes", notesInput); // 🎯 YENİ: Notları da gönderiyoruz
     selectedFiles.forEach((file) => {
       formData.append("images", file);
     });
@@ -215,16 +281,39 @@ const BookingsDashboard = () => {
     try {
       if (pinActionType === "handover") {
         await itemApi.handoverBooking(selectedBookingId, formData);
-        toast.fire({ icon: "success", title: "Teslimat onaylandı, kiralama başladı!" });
+        toast.fire({ icon: "success", title: "Teslimat kanıtları satıcıya iletildi!" });
       } else if (pinActionType === "complete") {
         await itemApi.completeBooking(selectedBookingId, formData);
-        toast.fire({ icon: "success", title: "İade onaylandı, süreç tamamlandı!" });
+        toast.fire({ icon: "success", title: "İade kanıtları kiracıya iletildi!" });
       }
       setIsPinModalOpen(false);
       setSelectedFiles([]);
+      setNotesInput("");
       fetchBookingsAndOffers();
     } catch (error) {
       toast.fire({ icon: "error", title: error.response?.data?.error || "İşlem başarısız. Bilgileri kontrol edin." });
+    }
+  };
+
+  // 🎯 YENİ: Uyuşmazlık (Dispute) Fonksiyonları
+  const openDisputeModal = (bookingId) => {
+    setSelectedBookingId(bookingId);
+    setDisputeReason("");
+    setIsDisputeModalOpen(true);
+  };
+
+  const submitDispute = async () => {
+    if (!disputeReason.trim()) {
+      return toast.fire({ icon: "warning", title: "Lütfen itiraz sebebini yazınız." });
+    }
+
+    try {
+      await itemApi.raiseDispute(selectedBookingId, { reason: disputeReason });
+      toast.fire({ icon: "success", title: "İtirazınız yetkililere iletildi." });
+      setIsDisputeModalOpen(false);
+      fetchBookingsAndOffers();
+    } catch (error) {
+      toast.fire({ icon: "error", title: error.response?.data?.error || "İşlem başarısız." });
     }
   };
 
@@ -237,17 +326,37 @@ const BookingsDashboard = () => {
       ),
       pending_approval: (
         <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg text-[10px] font-black uppercase tracking-wider">
-          Onay Bekliyor
+          Satıcı Onayı Bekliyor
         </span>
       ),
       approved: (
         <span className="px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg text-[10px] font-black uppercase tracking-wider">
-          Satıcı Onayladı
+          Teslim Bekleniyor
+        </span>
+      ),
+      handover_pending: (
+        <span className="px-3 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg text-[10px] font-black uppercase tracking-wider animate-pulse">
+          Teslimat Onayı Bekliyor
         </span>
       ),
       active: (
         <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] font-black uppercase tracking-wider">
           Kirada (Aktif)
+        </span>
+      ),
+      return_pending: (
+        <span className="px-3 py-1 bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 rounded-lg text-[10px] font-black uppercase tracking-wider animate-pulse">
+          İade Onayı Bekliyor
+        </span>
+      ),
+      disputed: (
+        <span className="px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-lg text-[10px] font-black uppercase tracking-wider animate-bounce">
+          🚨 Anlaşmazlık Var
+        </span>
+      ),
+      completed: (
+        <span className="px-3 py-1 bg-slate-700/50 text-slate-300 border border-slate-600/50 rounded-lg text-[10px] font-black uppercase tracking-wider">
+          Tamamlandı
         </span>
       ),
     };
@@ -262,12 +371,22 @@ const BookingsDashboard = () => {
     const renterId = String(b.renter).toLowerCase();
     const ownerId = String(b.item_detail.owner).toLowerCase();
     const isUserRoleMatch = activeTab === "renter" ? renterId === currentUserId : ownerId === currentUserId;
-    const isActiveStatus = ["awaiting_payment", "pending_approval", "approved", "active"].includes(b.status);
+
+    // 🎯 YENİ: Gösterilecek statüleri güncelledik (iptaller hariç her şey)
+    const isActiveStatus = [
+      "awaiting_payment",
+      "pending_approval",
+      "approved",
+      "handover_pending",
+      "active",
+      "return_pending",
+      "disputed",
+    ].includes(b.status);
     return isUserRoleMatch && isActiveStatus;
   });
 
   return (
-    <div className="w-full relative selection:bg-blue-500/30">
+    <div className="w-full relative selection:bg-blue-500/30 min-h-screen">
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
         <h1 className="text-2xl font-black text-slate-100 mb-6">Kiralama İşlemlerim</h1>
 
@@ -291,9 +410,9 @@ const BookingsDashboard = () => {
             filteredBookings.map((booking) => (
               <div
                 key={booking.id}
-                className="cyber-card p-5 border border-slate-700/50 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:bg-slate-800/30 transition-colors">
-                <div className="flex items-center gap-4">
-                  {/* 🎯 DEĞİŞTİRİLDİ: Resim artık Link (Yeni sekmede açılabilir) */}
+                className="cyber-card p-5 border border-slate-700/50 flex flex-col md:flex-row md:items-start justify-between gap-6 hover:bg-slate-800/30 transition-colors">
+                {/* SOL: İlan Bilgileri */}
+                <div className="flex items-start gap-4">
                   <Link to={`/listings/${booking.item_detail.id}`} className="shrink-0">
                     <img
                       src={booking.item_detail.images?.[0]?.image || "https://via.placeholder.com/80"}
@@ -302,7 +421,6 @@ const BookingsDashboard = () => {
                     />
                   </Link>
                   <div>
-                    {/* 🎯 DEĞİŞTİRİLDİ: Başlık artık Link (Yeni sekmede açılabilir) */}
                     <Link to={`/listings/${booking.item_detail.id}`}>
                       <h3 className="text-sm font-bold text-slate-100 hover:text-blue-400 transition-colors">
                         {booking.item_detail.title}
@@ -311,17 +429,38 @@ const BookingsDashboard = () => {
                     <div className="text-xs text-slate-400 mt-1 font-mono">
                       {formatReadableDate(booking.start_date)} <span className="mx-1">→</span> {formatReadableDate(booking.end_date)}
                     </div>
-                    <div className="mt-2">{getStatusBadge(booking.status)}</div>
+                    <div className="mt-2.5">{getStatusBadge(booking.status)}</div>
                   </div>
                 </div>
 
-                <div className="text-left md:text-center border-l border-r border-slate-700/50 px-6">
+                {/* ORTA: Fiyatlar ve Anlaşmazlık/Not Detayları */}
+                <div className="text-left md:text-center border-l border-r border-slate-700/50 px-6 max-w-[250px] flex-1 flex flex-col justify-center">
                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Toplam Kiralama</span>
                   <span className="text-lg font-black text-blue-400">₺{booking.total_price}</span>
                   <div className="text-[10px] text-slate-500 mt-1">+₺{booking.deposit_price} Güvence Bedeli</div>
+
+                  {/* Yeni: Varsa yorumları/itirazları göster */}
+                  {booking.handover_notes && (
+                    <div className="mt-3 text-[10px] text-slate-400 italic bg-slate-900/50 p-2 rounded border border-slate-700/50">
+                      <span className="font-bold text-slate-300 not-italic block mb-0.5">Kiracının Teslimat Notu:</span>"
+                      {booking.handover_notes}"
+                    </div>
+                  )}
+                  {booking.return_notes && (
+                    <div className="mt-2 text-[10px] text-slate-400 italic bg-slate-900/50 p-2 rounded border border-slate-700/50">
+                      <span className="font-bold text-slate-300 not-italic block mb-0.5">Satıcının İade Notu:</span>"{booking.return_notes}"
+                    </div>
+                  )}
+                  {booking.status === "disputed" && (
+                    <div className="mt-2 text-[10px] text-rose-400 font-bold bg-rose-500/10 p-2 rounded border border-rose-500/30">
+                      İtiraz Sebebi: "{booking.dispute_reason}"
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex flex-col gap-2 min-w-[200px]">
+                {/* SAĞ: Aksiyon Butonları (Dinamik) */}
+                <div className="flex flex-col gap-2 min-w-[200px] shrink-0 justify-center">
+                  {/* --- 0. Ödeme / Onay --- */}
                   {booking.status === "awaiting_payment" && activeTab === "renter" && (
                     <button
                       onClick={() => handlePayPseudoBooking(booking)}
@@ -329,52 +468,98 @@ const BookingsDashboard = () => {
                       💳 Hemen Öde ve Başlat
                     </button>
                   )}
-                  {booking.status === "awaiting_payment" && activeTab === "owner" && (
-                    <div className="text-[10px] text-center w-full py-2 rounded-lg bg-slate-800/50 text-slate-400 font-bold border border-slate-700/50 cursor-default">
-                      Kiracının Ödemesi Bekleniyor
-                    </div>
-                  )}
-
                   {booking.status === "pending_approval" && activeTab === "owner" && (
                     <button onClick={() => handleApprove(booking.id)} className="btn-gradient p-2 text-[11px]">
                       ✅ Talebi Onayla
                     </button>
                   )}
 
-                  {["pending_approval", "approved"].includes(booking.status) && !booking.is_pseudo && (
+                  {/* İptal Et (Ödeme ve onay aşamasında) */}
+                  {["awaiting_payment", "pending_approval", "approved"].includes(booking.status) && (
                     <button
-                      onClick={() => handleCancel(booking.id, booking.status === "approved")}
+                      onClick={() => handleCancel(booking)}
                       className="btn-slate !text-rose-400 p-2 text-[11px] hover:bg-rose-500/10 w-full border-rose-500/20">
                       ❌ İşlemi İptal Et
                     </button>
                   )}
 
-                  {booking.status === "approved" && activeTab === "renter" && (
+                  {/* --- 1. TESLİMAT AŞAMASI (approved) --- */}
+                  {booking.status === "approved" && activeTab === "owner" && (
                     <div className="bg-slate-950 p-3 rounded-lg border border-slate-700 text-center">
-                      <span className="text-[10px] text-slate-400 block">Teslim Alırken Satıcıya Söyle:</span>
+                      <span className="text-[10px] text-slate-400 block">Teslim Ederken Kiracıya Söyle:</span>
                       <span className="text-lg font-mono font-black text-amber-400 tracking-widest">{booking.handover_pin}</span>
                     </div>
                   )}
-                  {booking.status === "approved" && activeTab === "owner" && (
+                  {booking.status === "approved" && activeTab === "renter" && (
                     <button
                       onClick={() => openPinModal(booking.id, "handover")}
-                      className="btn-slate bg-blue-500/10 text-blue-400 border-blue-500/50 p-2 text-[11px] hover:bg-blue-500/20">
-                      📦 Ürünü Teslim Et (PIN + FOTO)
+                      className="btn-slate bg-indigo-500/10 text-indigo-400 border-indigo-500/50 p-2 text-[11px] hover:bg-indigo-500/20">
+                      📦 Ürünü Teslim Al (PIN + FOTO)
                     </button>
                   )}
 
-                  {booking.status === "active" && activeTab === "owner" && (
+                  {/* --- 2. TESLİMAT ONAYI AŞAMASI (handover_pending) --- */}
+                  {booking.status === "handover_pending" && activeTab === "owner" && (
+                    <>
+                      <button
+                        onClick={() => handleApproveHandover(booking.id)}
+                        className="btn-gradient !bg-emerald-500 !border-emerald-400 p-2 text-[11px] shadow-lg shadow-emerald-500/20">
+                        ✅ Teslimatı Onayla
+                      </button>
+                      <button
+                        onClick={() => openDisputeModal(booking.id)}
+                        className="btn-slate !text-rose-400 p-2 text-[11px] hover:bg-rose-500/10 w-full border-rose-500/20 mt-1">
+                        🚨 İtiraz Et (Uyuşmazlık)
+                      </button>
+                    </>
+                  )}
+                  {booking.status === "handover_pending" && activeTab === "renter" && (
+                    <div className="text-[10px] text-center w-full py-2 rounded-lg bg-slate-800/50 text-slate-400 font-bold border border-slate-700/50 cursor-default">
+                      Satıcının onayı bekleniyor
+                    </div>
+                  )}
+
+                  {/* --- 3. İADE AŞAMASI (active) --- */}
+                  {booking.status === "active" && activeTab === "renter" && (
                     <div className="bg-slate-950 p-3 rounded-lg border border-slate-700 text-center">
-                      <span className="text-[10px] text-slate-400 block">İade Alırken Kiracıya Söyle:</span>
+                      <span className="text-[10px] text-slate-400 block">İade Ederken Satıcıya Söyle:</span>
                       <span className="text-lg font-mono font-black text-emerald-400 tracking-widest">{booking.return_pin}</span>
                     </div>
                   )}
-                  {booking.status === "active" && activeTab === "renter" && (
+                  {booking.status === "active" && activeTab === "owner" && (
                     <button
                       onClick={() => openPinModal(booking.id, "complete")}
-                      className="btn-slate bg-emerald-500/10 text-emerald-400 border-emerald-500/50 p-2 text-[11px] hover:bg-emerald-500/20">
-                      🔄 İadeyi Tamamla (PIN + FOTO)
+                      className="btn-slate bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/50 p-2 text-[11px] hover:bg-fuchsia-500/20">
+                      🔄 İadeyi Al (PIN + FOTO)
                     </button>
+                  )}
+
+                  {/* --- 4. İADE ONAYI AŞAMASI (return_pending) --- */}
+                  {booking.status === "return_pending" && activeTab === "renter" && (
+                    <>
+                      <button
+                        onClick={() => handleApproveReturn(booking.id)}
+                        className="btn-gradient !bg-emerald-500 !border-emerald-400 p-2 text-[11px] shadow-lg shadow-emerald-500/20">
+                        ✅ İadeyi Onayla (Depozitoyu Al)
+                      </button>
+                      <button
+                        onClick={() => openDisputeModal(booking.id)}
+                        className="btn-slate !text-rose-400 p-2 text-[11px] hover:bg-rose-500/10 w-full border-rose-500/20 mt-1">
+                        🚨 İtiraz Et (Hasar Var)
+                      </button>
+                    </>
+                  )}
+                  {booking.status === "return_pending" && activeTab === "owner" && (
+                    <div className="text-[10px] text-center w-full py-2 rounded-lg bg-slate-800/50 text-slate-400 font-bold border border-slate-700/50 cursor-default">
+                      Kiracının onayı bekleniyor
+                    </div>
+                  )}
+
+                  {/* --- 5. ANLAŞMAZLIK AŞAMASI (disputed) --- */}
+                  {booking.status === "disputed" && (
+                    <div className="text-[10px] text-center w-full py-2 rounded-lg bg-rose-500/10 text-rose-400 font-bold border border-rose-500/30 cursor-default">
+                      Yönetici İncelemesinde
+                    </div>
                   )}
                 </div>
               </div>
@@ -383,7 +568,7 @@ const BookingsDashboard = () => {
         </div>
       </div>
 
-      {/* PIN VE FOTO GİRİŞ MODALI */}
+      {/* 🎯 PIN, FOTO VE NOT GİRİŞ MODALI */}
       <AnimatePresence>
         {isPinModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -395,8 +580,8 @@ const BookingsDashboard = () => {
               <h3 className="text-lg font-black text-slate-100 mb-2">📸 Güvenli Kanıt Protokolü</h3>
               <p className="text-xs text-slate-400 mb-4">
                 {pinActionType === "handover"
-                  ? "Kiracının PIN kodunu girin ve ürünün şu anki durumunu gösteren fotoğrafları ekleyin."
-                  : "Satıcının PIN kodunu girin ve ürünün iade anındaki durum fotoğraflarını ekleyin."}
+                  ? "Satıcının PIN kodunu girin, ürünün durumunu gösteren fotoğrafları ekleyin ve notunuzu bırakın."
+                  : "Kiracının PIN kodunu girin, iade anındaki durum fotoğraflarını ekleyin ve notunuzu bırakın."}
               </p>
 
               <input
@@ -406,6 +591,15 @@ const BookingsDashboard = () => {
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value.toUpperCase())}
                 className="cyber-input w-full text-center text-2xl tracking-[0.5em] font-mono font-bold mb-4"
+              />
+
+              {/* 🎯 YENİ: Yorum Alanı */}
+              <textarea
+                placeholder="Ürünün durumu hakkında notunuz (Örn: Çiziksiz teslim aldım)"
+                rows={3}
+                value={notesInput}
+                onChange={(e) => setNotesInput(e.target.value)}
+                className="cyber-input w-full resize-none text-xs mb-4"
               />
 
               <div className="space-y-2 mb-4">
@@ -446,6 +640,44 @@ const BookingsDashboard = () => {
                 </button>
                 <button onClick={submitPin} className="btn-gradient flex-1 cursor-pointer active:scale-95">
                   Doğrula ve Kaydet
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 🎯 YENİ: İTİRAZ (DISPUTE) MODALI */}
+      <AnimatePresence>
+        {isDisputeModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="cyber-card p-6 w-full max-w-sm border border-rose-500/30 shadow-2xl shadow-rose-500/10">
+              <h3 className="text-lg font-black text-rose-400 mb-2 flex items-center gap-2">🚨 Anlaşmazlık Bildir</h3>
+              <p className="text-xs text-slate-400 mb-4">
+                Karşı tarafın yüklediği fotoğraflar veya notlar gerçeği yansıtmıyorsa, hasar varsa veya ürün eksikse lütfen detaylıca
+                açıklayın.
+              </p>
+
+              <textarea
+                placeholder="Lütfen itiraz sebebinizi detaylı bir şekilde yazınız..."
+                rows={5}
+                value={disputeReason}
+                onChange={(e) => setDisputeReason(e.target.value)}
+                className="cyber-input w-full resize-none text-sm mb-6"
+              />
+
+              <div className="flex gap-3">
+                <button onClick={() => setIsDisputeModalOpen(false)} className="btn-slate flex-1 cursor-pointer active:scale-95">
+                  Vazgeç
+                </button>
+                <button
+                  onClick={submitDispute}
+                  className="btn-gradient !bg-rose-600 !border-rose-500 flex-1 cursor-pointer active:scale-95 shadow-lg shadow-rose-500/20">
+                  Bildirimi Gönder
                 </button>
               </div>
             </motion.div>
