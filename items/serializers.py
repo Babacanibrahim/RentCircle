@@ -9,7 +9,7 @@ User = get_user_model()
 
 class NotificationSerializer(serializers.ModelSerializer):
     sender_name = serializers.CharField(source='sender.first_name', read_only=True)
-    sender_avatar = serializers.CharField(source='sender.username', read_only=True) # Avatar harfi için
+    sender_avatar = serializers.CharField(source='sender.username', read_only=True) 
     
     class Meta:
         model = Notification
@@ -34,13 +34,11 @@ class ReviewSerializer(serializers.ModelSerializer):
     reviewer_first_name = serializers.ReadOnlyField(source='reviewer.first_name')
     reviewer_last_name = serializers.ReadOnlyField(source='reviewer.last_name')
     
-    # Frontend'deki minyatür ürün kartı için gereken ekstra veriler
     item_title = serializers.CharField(source='item.title', read_only=True)
     item_image = serializers.SerializerMethodField()
     
     class Meta:
         model = Review
-        # DÜZELTİLDİ: 'reviewer_last_name' ve 'owner' arasına virgül eklendi
         fields = [
             'id', 'booking', 'item', 'item_title', 'item_image', 
             'reviewer', 'reviewer_username', 'reviewer_show_name', 
@@ -82,16 +80,13 @@ class ItemSerializer(serializers.ModelSerializer):
     is_currently_rented = serializers.SerializerMethodField()
     owner_rating = serializers.SerializerMethodField()
     owner_review_count = serializers.SerializerMethodField()
-    
-    # 🎯 YENİ EKLENEN KISIM: Dolu Tarihleri Frontend'e Gönderiyoruz
     booked_dates = serializers.SerializerMethodField()
     favorites_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Item
-        # 🎯 DİKKAT: 'booked_dates' alanını fields listesine ekledik!
         fields = [
-            'id', 'owner', 'owner_name', 'category', 'category_detail', 
+            'id', 'owner', 'reviews', 'owner_name', 'category', 'category_detail', 
             'title', 'description', 'price_per_day', 
             'city', 'district', 'region',
             'full_address', 'latitude', 'longitude', 
@@ -138,9 +133,7 @@ class ItemSerializer(serializers.ModelSerializer):
             return end_date
         return None
 
-    # 🎯 YENİ EKLENEN KISIM: Hangi günler kiralıysa o günleri liste olarak dön
     def get_booked_dates(self, obj):
-        # 'approved' (Onaylanmış ama başlamamış) ve 'active' (Şu an kullanan) kiralamalar
         active_bookings = obj.bookings.filter(status__in=['approved', 'active'])
         return [
             {
@@ -160,7 +153,6 @@ class StoreDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        # DÜZELTİLDİ: 'show_name' alanı frontend'in ismini gizlemesi için eklendi
         fields = [
             'id', 'username', 'show_name', 'first_name', 'last_name', 
             'rating', 'review_count', 'reviews', 'active_listings', 'rented_listings'
@@ -194,19 +186,24 @@ class BookingSerializer(serializers.ModelSerializer):
     handover_images = serializers.SerializerMethodField()
     return_images = serializers.SerializerMethodField()
     has_review = serializers.SerializerMethodField()
-    
-    # 🎯 YENİ: İptal edeni frontend'e "Ahmet Yılmaz" gibi şık bir formatta gönderiyoruz
     cancelled_by_name = serializers.CharField(source='cancelled_by.first_name', read_only=True)
 
     class Meta:
         model = Booking
+        # 🎯 YENİ EKLENENLER: handover_notes, return_notes, dispute_winner
         fields = [
             'id', 'item', 'item_detail', 'renter', 'renter_name', 
             'start_date', 'end_date', 'status', 'total_price', 'deposit_price', 
             'handover_pin', 'return_pin', 'handover_images', 'return_images', 
-            'dispute_reason', 'has_review', 'cancelled_by_name', 'created_at' # cancelled_by_name eklendi
+            'handover_notes', 'return_notes', 'dispute_reason', 'dispute_winner', 
+            'has_review', 'cancelled_by_name', 'created_at' 
         ]
-        read_only_fields = ['renter', 'total_price', 'deposit_price', 'status', 'handover_pin', 'return_pin', 'handover_images', 'return_images']
+        # Güvenlik için notları ve kararları read-only yapıyoruz (sadece özel API'lerden güncellenmeli)
+        read_only_fields = [
+            'renter', 'total_price', 'deposit_price', 'status', 'handover_pin', 
+            'return_pin', 'handover_images', 'return_images',
+            'handover_notes', 'return_notes', 'dispute_winner'
+        ]
 
     def get_has_review(self, obj):
         return hasattr(obj, 'review')

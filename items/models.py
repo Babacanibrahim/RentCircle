@@ -54,7 +54,10 @@ class Booking(models.Model):
     STATUS_CHOICES = [
         ('pending_approval', 'Onay Bekliyor (Para Havuzda)'),
         ('approved', 'Onaylandı (Bekleniyor)'),
+        # 🎯 YENİ: Teslimat sürecindeki ara durumlar
+        ('handover_pending', 'Satıcı Teslimat Onayı Bekliyor'), # Kiracı teslim alıp fotoğraf yüklediğinde
         ('active', 'Kirada (Teslim Edildi)'),
+        ('return_pending', 'Kiracı İade Onayı Bekliyor'), # Satıcı iade alıp fotoğraf yüklediğinde
         ('completed', 'Tamamlandı (İade Edildi)'),
         ('rejected', 'Reddedildi / İptal'),
         ('disputed', 'Uyuşmazlık (Sorun Var)'),
@@ -74,13 +77,24 @@ class Booking(models.Model):
     handover_pin = models.CharField(max_length=6, blank=True, null=True)
     return_pin = models.CharField(max_length=6, blank=True, null=True)
     
-    # 🎯 YENİ: Kimin iptal ettiğini takip etmek için
     cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='cancelled_bookings')
     
+    # 🎯 YENİ: Tarafların Teslimat/İade Esnasında Bıraktıkları Yorumlar
+    handover_notes = models.TextField(blank=True, null=True, help_text="Kiracının ürünü alırken bıraktığı not")
+    return_notes = models.TextField(blank=True, null=True, help_text="Satıcının ürünü iade alırken bıraktığı not")
+
+    # 🎯 YENİ: Uyuşmazlık Çözümü İçin Gerekli Alanlar
+    dispute_reason = models.TextField(blank=True, null=True, help_text="İtiraz edilirse sebebi")
+    
+    DISPUTE_WINNER_CHOICES = (
+        ('owner', 'Satıcı Haklı (Depozito Satıcıda Kalır)'),
+        ('renter', 'Kiracı Haklı (Depozito İade Edilir)'),
+        ('draw', 'Berabere / Kısmi'),
+    )
+    dispute_winner = models.CharField(max_length=10, choices=DISPUTE_WINNER_CHOICES, blank=True, null=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    dispute_reason = models.TextField(blank=True, null=True) 
 
     def generate_pin(self, length=6):
         chars = string.ascii_uppercase + string.digits
@@ -91,12 +105,9 @@ class Booking(models.Model):
             days = (self.end_date - self.start_date).days + 1
             if days <= 0: days = 1
             
-            # 🎯 KRİTİK DÜZELTME: Eğer total_price dışarıdan (tekliften) gelmemişse standart hesapla!
-            # Eğer geldiyse, anlaşılan o teklif fiyatına dokunma.
             if not self.total_price:
                 self.total_price = self.item.price_per_day * days
                 
-            # Depozitoyu (Standart veya Pazarlıklı) o anki total_price üzerinden hesapla
             self.deposit_price = Decimal(str(self.total_price)) * Decimal('0.15')
             
         if not self.handover_pin:
@@ -111,9 +122,10 @@ class Booking(models.Model):
 
 
 class BookingImage(models.Model):
+    # 🎯 DÜZELTİLDİ: Sadece image_type değil, stage (aşama) olarak netleştirildi.
     IMAGE_TYPE_CHOICES = [
-        ('handover', 'Teslimat Anı'),
-        ('return', 'İade Anı'),
+        ('handover', 'Teslim Alırken (Kiracı Yükledi)'),
+        ('return', 'İade Ederken (Satıcı Yükledi)'),
     ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='images')
@@ -122,7 +134,7 @@ class BookingImage(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.image_type} - {self.booking.id}"
+        return f"{self.get_image_type_display()} - {self.booking.id}"
 
 
 class ItemImage(models.Model):
@@ -164,8 +176,7 @@ class Message(models.Model):
     content = models.TextField()
     is_read = models.BooleanField(default=False)
     
-    # 🎯 YENİ: Teklif (Pazarlık) Sistemi Alanları
-    is_offer = models.BooleanField(default=False) # Bu mesaj bir teklif mi?
+    is_offer = models.BooleanField(default=False)
     offer_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     offer_start_date = models.DateField(blank=True, null=True)
     offer_end_date = models.DateField(blank=True, null=True)
@@ -207,15 +218,15 @@ class Review(models.Model):
     
 
 class Notification(models.Model):
-    # 🎯 YENİ: Bildirim türlerine Finansal ve İptal/Sistem türlerini ekledik.
     NOTIFICATION_TYPES = (
         ('message', 'Mesaj'),
         ('booking', 'Kiralama Talebi'),
         ('wallet', 'Cüzdan ve Finans'),
         ('system', 'İptal ve Sistem'),
+        ('review', 'Değerlendirme'), # 🎯 YENİ: Yorum bildirimleri için
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    sender = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True) # Sistem bildirimlerinde sender null olabilir
+    sender = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True) 
     item = models.ForeignKey(Item, on_delete=models.CASCADE, null=True, blank=True)
     notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
     
