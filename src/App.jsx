@@ -9,6 +9,7 @@ import PrivateRoute from "./features/components/PrivateRoute";
 import MainLayout from "./features/components/MainLayout";
 
 // Uygulama İçi Sayfalar
+import AdminDashboard from "../src/features/admin/views/AdminDashboard";
 import ItemDashboard from "./features/items/views/ItemDashboard";
 import ItemDetail from "./features/items/views/ItemDetail";
 import StoreDetail from "./features/items/views/StoreDetail";
@@ -20,12 +21,12 @@ import RentalHistory from "./features/items/views/RentalHistory";
 import Profile from "./features/auth/views/Profile";
 import ForgotPassword from "./features/auth/views/ForgotPassword";
 import MyListings from "./features/items/views/MyListings";
-
-// 🎯 YENİ: Cüzdan Sayfası
 import WalletDashboard from "./features/items/views/WalletDashboard";
+import NotFound from "./features/components/NotFound";
 
 function App() {
   const isAuthenticated = !!(localStorage.getItem("access_token") || sessionStorage.getItem("access_token"));
+
   return (
     <Router>
       <Routes>
@@ -57,6 +58,16 @@ function App() {
           }
         />
 
+        {/* 🎯 DÜZELTİLDİ: Admin Dashboard Rotası (Syntax hatası giderildi ve güvenliğe alındı) */}
+        <Route
+          path="/admin-dashboard"
+          element={
+            <PrivateRoute>
+              <AdminDashboard />
+            </PrivateRoute>
+          }
+        />
+
         {/* --- LAYOUT İÇİNDE KALANLAR (NAVBAR VE FOOTER OTOMATİK EKLENECEK) --- */}
         <Route element={<MainLayout />}>
           <Route
@@ -75,8 +86,6 @@ function App() {
               </PrivateRoute>
             }
           />
-
-          {/* 🎯 YENİ: Cüzdan Rotası */}
           <Route
             path="/wallet"
             element={
@@ -85,7 +94,6 @@ function App() {
               </PrivateRoute>
             }
           />
-
           <Route
             path="/create-listing"
             element={
@@ -94,7 +102,6 @@ function App() {
               </PrivateRoute>
             }
           />
-
           <Route
             path="/my-listings"
             element={
@@ -103,7 +110,6 @@ function App() {
               </PrivateRoute>
             }
           />
-
           <Route
             path="/bookings"
             element={
@@ -153,6 +159,8 @@ function App() {
             }
           />
         </Route>
+
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Router>
   );

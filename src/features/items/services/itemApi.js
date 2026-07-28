@@ -5,138 +5,79 @@ const getAuthHeader = () => {
   return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
 };
 
-export const itemApi = {
+const multipartHeader = {
+  "Content-Type": "multipart/form-data",
+  Authorization: `Bearer ${localStorage.getItem("access_token") || sessionStorage.getItem("access_token")}`
+};
 
+export const itemApi = {
+  // --- İLAN & MAĞAZA İŞLEMLERİ ---
   getListings: async (filters = {}) => { 
     const queryParams = new URLSearchParams();
     if (filters.city) queryParams.append('city', filters.city);
     if (filters.district) queryParams.append('district', filters.district);
     if (filters.search) queryParams.append('search', filters.search); 
-    
-    const queryString = queryParams.toString();
-    const url = queryString ? `items/listings/?${queryString}` : "items/listings/";
-    
+    const url = queryParams.toString() ? `items/listings/?${queryParams.toString()}` : "items/listings/";
     const res = await axiosInstance.get(url); 
     return res.data; 
   },
-  
-  getCategories: async () => { const res = await axiosInstance.get("items/categories/"); return res.data; },
-  getListingDetail: async (id) => { const res = await axiosInstance.get(`items/listings/${id}/`); return res.data; },
-  getStoreDetail: async (ownerId) => { const res = await axiosInstance.get(`items/stores/${ownerId}/`); return res.data; },
+  getCategories: async () => (await axiosInstance.get("items/categories/")).data,
+  getListingDetail: async (id) => (await axiosInstance.get(`items/listings/${id}/`)).data,
+  getStoreDetail: async (ownerId) => (await axiosInstance.get(`items/stores/${ownerId}/`)).data,
+  getMyListings: async () => (await axiosInstance.get('items/listings/my_listings/', getAuthHeader())).data,
+  createListing: async (formData) => (await axiosInstance.post("items/listings/", formData, { headers: multipartHeader })).data,
+  updateListing: async (id, data) => (await axiosInstance.patch(`items/listings/${id}/`, data, { 
+    headers: data instanceof FormData ? multipartHeader : getAuthHeader().headers 
+  })).data,
+  toggleFavorite: async (itemId) => (await axiosInstance.post(`items/listings/${itemId}/favorite/`, {}, getAuthHeader())).data,
+  getFavorites: async () => (await axiosInstance.get("items/listings/my_favorites/", getAuthHeader())).data,
 
-  createListing: async (formData) => {
-    const res = await axiosInstance.post("items/listings/", formData, {
-      headers: { "Content-Type": "multipart/form-data", Authorization: `Bearer ${localStorage.getItem("access_token") || sessionStorage.getItem("access_token")}` },
-    });
-    return res.data;
-  },
-  toggleFavorite: async (itemId) => { const res = await axiosInstance.post(`items/listings/${itemId}/favorite/`, {}, getAuthHeader()); return res.data; },
-  getFavorites: async () => { const res = await axiosInstance.get("items/listings/my_favorites/", getAuthHeader()); return res.data; },
+  // --- KİRALAMA & ÖDEME ---
+  createBooking: async (data) => (await axiosInstance.post("items/bookings/", data, getAuthHeader())).data,
+  getBookings: async () => (await axiosInstance.get("items/bookings/", getAuthHeader())).data,
+  payWithWallet: async (itemId, data) => (await axiosInstance.post(`items/listings/${itemId}/pay-with-wallet/`, data, getAuthHeader())).data,
+  approveBooking: async (id) => (await axiosInstance.post(`items/bookings/${id}/approve/`, {}, getAuthHeader())).data,
+  handoverBooking: async (id, formData) => (await axiosInstance.post(`items/bookings/${id}/handover/`, formData, { headers: multipartHeader })).data,
+  completeBooking: async (id, formData) => (await axiosInstance.post(`items/bookings/${id}/complete_booking/`, formData, { headers: multipartHeader })).data,
+  cancelBooking: async (id) => (await axiosInstance.post(`items/bookings/${id}/cancel/`, {}, getAuthHeader())).data,
 
-  payWithWallet: async (itemId, bookingData) => {
-    const res = await axiosInstance.post(`items/listings/${itemId}/pay-with-wallet/`, bookingData, getAuthHeader());
-    return res.data;
-  },
+  // --- UYUŞMAZLIK & ONAY SÜREÇLERİ ---
+  approveHandover: async (id) => (await axiosInstance.post(`items/bookings/${id}/approve_handover/`, {}, getAuthHeader())).data,
+  approveReturn: async (id) => (await axiosInstance.post(`items/bookings/${id}/approve_return/`, {}, getAuthHeader())).data,
+  raiseDispute: async (id, data) => (await axiosInstance.post(`items/bookings/${id}/raise_dispute/`, data, getAuthHeader())).data,
+  resolveDispute: async (id, data) => (await axiosInstance.post(`items/bookings/${id}/resolve_dispute/`, data, getAuthHeader())).data,
 
-  createBooking: async (bookingData) => { const res = await axiosInstance.post("items/bookings/", bookingData, getAuthHeader()); return res.data; },
-  getBookings: async () => { const res = await axiosInstance.get("items/bookings/", getAuthHeader()); return res.data; },
-  approveBooking: async (bookingId) => { const res = await axiosInstance.post(`items/bookings/${bookingId}/approve/`, {}, getAuthHeader()); return res.data; },
-  
-  handoverBooking: async (bookingId, formData) => {
-    const response = await axiosInstance.post(`items/bookings/${bookingId}/handover/`, formData, {
-      headers: { "Content-Type": "multipart/form-data", Authorization: `Bearer ${localStorage.getItem("access_token") || sessionStorage.getItem("access_token")}` }
-    });
-    return response.data;
-  },
+  // --- MESAJ & YORUM ---
+  getConversations: async () => (await axiosInstance.get("items/conversations/", getAuthHeader())).data,
+  getMessages: async (id) => (await axiosInstance.get(`items/conversations/${id}/messages/`, getAuthHeader())).data,
+  sendMessage: async (id, payload) => (await axiosInstance.post(`items/conversations/${id}/send_message/`, payload, getAuthHeader())).data,
+  startConversation: async (itemId, renter, owner) => (await axiosInstance.post("items/conversations/", { item: itemId, renter, owner }, getAuthHeader())).data,
+  checkConversationExists: async (itemId) => (await axiosInstance.get(`items/conversations/check_existing/?item_id=${itemId}`, getAuthHeader())).data,
+  sendDirectMessage: async (payload) => (await axiosInstance.post(`items/conversations/send_direct_message/`, payload, getAuthHeader())).data,
+  respondToOffer: async (id, action) => (await axiosInstance.post(`items/conversations/respond_offer/`, { message_id: id, action }, getAuthHeader())).data,
+  createReview: async (data) => (await axiosInstance.post("items/reviews/", data, getAuthHeader())).data,
 
-  completeBooking: async (bookingId, formData) => {
-    // 🎯 DÜZELTİLDİ: "complete/" yerine "complete_booking/" olarak değiştirildi
-    const response = await axiosInstance.post(`items/bookings/${bookingId}/complete_booking/`, formData, {
-      headers: { 
-        "Content-Type": "multipart/form-data", 
-        Authorization: `Bearer ${localStorage.getItem("access_token") || sessionStorage.getItem("access_token")}` 
-      }
-    });
-    return response.data;
-  },
-  cancelBooking: async (bookingId) => { const res = await axiosInstance.post(`items/bookings/${bookingId}/cancel/`, {}, getAuthHeader()); return res.data; },
-  
-  getConversations: async () => { const res = await axiosInstance.get("items/conversations/", getAuthHeader()); return res.data; },
-  getMessages: async (conversationId) => { const res = await axiosInstance.get(`items/conversations/${conversationId}/messages/`, getAuthHeader()); return res.data; },
-  sendMessage: async (conversationId, payload) => { 
-    const res = await axiosInstance.post(`items/conversations/${conversationId}/send_message/`, payload, getAuthHeader()); 
-    return res.data; 
-  },
-  startConversation: async (itemId, renterId, ownerId) => {
-    const res = await axiosInstance.post("items/conversations/", { item: itemId, renter: renterId, owner: ownerId }, getAuthHeader());
-    return res.data;
-  },
-  createReview: async (reviewData) => {
-    const response = await axiosInstance.post("items/reviews/", reviewData, getAuthHeader());
-    return response.data;
-  },
+  // --- BİLDİRİMLER ---
+  getNotifications: async () => (await axiosInstance.get("items/notifications/", getAuthHeader())).data,
+  markNotificationsRead: async () => (await axiosInstance.patch("items/notifications/", {}, getAuthHeader())).data,
+  deleteNotification: async (id) => (await axiosInstance.delete(`items/notifications/${id}/`, getAuthHeader())).data,
+  clearAllNotifications: async () => (await axiosInstance.delete('items/notifications/clear_all/', getAuthHeader())).data,
 
-  getNotifications: async () => { 
-    const res = await axiosInstance.get("items/notifications/", getAuthHeader()); 
-    return res.data; 
-  },
-  markNotificationsRead: async () => { 
-    const res = await axiosInstance.patch("items/notifications/", {}, getAuthHeader()); 
-    return res.data; 
-  },
-  deleteNotification: async (id) => { 
-    const res = await axiosInstance.delete(`items/notifications/${id}/`, getAuthHeader()); 
-    return res.data; 
-  },
-
-  checkConversationExists: async (itemId) => {
-    const response = await axiosInstance.get(`items/conversations/check_existing/?item_id=${itemId}`, getAuthHeader());
-    return response.data;
-  },
-
-  sendDirectMessage: async (payload) => {
-    const response = await axiosInstance.post(`items/conversations/send_direct_message/`, payload, getAuthHeader());
-    return response.data;
-  },
-
-  respondToOffer: async (messageId, action) => {
-    const response = await axiosInstance.post(`items/conversations/respond_offer/`, { message_id: messageId, action }, getAuthHeader());
-    return response.data;
-  },
-
-  clearAllNotifications: async () => {
-    // 🎯 Baştaki / kaldırıldı, Axios base url formatına uyduruldu
-    const response = await axiosInstance.delete('items/notifications/clear_all/', getAuthHeader());
-    return response.data;
-  },
-
-  getMyListings: async () => {
-    const response = await axiosInstance.get('items/listings/my_listings/', getAuthHeader());
-    return response.data;
-  },
-
-  updateListing: async (id, data) => {
-    const response = await axiosInstance.patch(`items/listings/${id}/`, data, {
-      headers: {
-        "Content-Type": data instanceof FormData ? "multipart/form-data" : "application/json",
-        Authorization: `Bearer ${localStorage.getItem("access_token") || sessionStorage.getItem("access_token")}`
-      },
-    });
-    return response.data;
-  },
-  
-  approveHandover: async (bookingId) => {
-    const res = await axiosInstance.post(`items/bookings/${bookingId}/approve_handover/`, {}, getAuthHeader());
-    return res.data;
-  },
-
-  approveReturn: async (bookingId) => {
-    const res = await axiosInstance.post(`items/bookings/${bookingId}/approve_return/`, {}, getAuthHeader());
-    return res.data;
-  },
-
-  raiseDispute: async (bookingId, data) => {
-    const res = await axiosInstance.post(`items/bookings/${bookingId}/raise_dispute/`, data, getAuthHeader());
-    return res.data;
-  }
+  // ==========================================
+  // 🛡️ GOD MODE (ADMIN) ENDPOINTLERİ
+  // ==========================================
+  getAdminStats: async () => (await axiosInstance.get(`items/admin-dashboard/stats/`, getAuthHeader())).data,
+  getDisputedBookings: async () => (await axiosInstance.get(`items/admin-dashboard/disputed_bookings/`, getAuthHeader())).data,
+  getAdminUsers: async (search = "") => (await axiosInstance.get(`items/admin-dashboard/users_list/?search=${search}`, getAuthHeader())).data,
+  updateAdminUser: async (data) => (await axiosInstance.post(`items/admin-dashboard/update_user/`, data, getAuthHeader())).data,
+  adminDeleteUser: async (id) => (await axiosInstance.delete(`items/admin-dashboard/delete_user/?user_id=${id}`, getAuthHeader())).data,
+  getAdminItems: async (search = "") => (await axiosInstance.get(`items/admin-dashboard/items_list/?search=${search}`, getAuthHeader())).data,
+  adminUpdateItem: async (data) => (await axiosInstance.post(`items/admin-dashboard/admin_update_item/`, data, getAuthHeader())).data,
+  toggleItemBan: async (id) => (await axiosInstance.post(`items/admin-dashboard/toggle_item_ban/`, { item_id: id }, getAuthHeader())).data,
+  adminDeleteItem: async (id) => (await axiosInstance.delete(`items/admin-dashboard/delete_item/?item_id=${id}`, getAuthHeader())).data,
+  getSystemLogs: async () => (await axiosInstance.get(`items/admin-dashboard/system_logs/`, getAuthHeader())).data,
+  getAdminUserLogs: async (id) => (await axiosInstance.get(`items/admin-dashboard/user_logs/?user_id=${id}`, getAuthHeader())).data,
+  requestWithdrawal: async (data) => (await axiosInstance.post('items/wallet/request_withdrawal/', data, getAuthHeader())).data,
+  getAdminWithdrawals: async () => (await axiosInstance.get(`items/admin-dashboard/withdrawals_list/`, getAuthHeader())).data,
+  handleAdminWithdrawal: async (data) => (await axiosInstance.post(`items/admin-dashboard/handle_withdrawal/`, data, getAuthHeader())).data,
 };
