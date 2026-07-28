@@ -1,20 +1,25 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-# 🎯 DİKKAT: PayWithWalletView'i buraya import ettik!
-from .views import CategoryViewSet, ItemViewSet, BookingViewSet, ConversationViewSet, ReviewViewSet, notification_list, notification_delete, PayWithWalletView, notification_clear_all
+from .views import (
+    CategoryViewSet, ItemViewSet, BookingViewSet, ConversationViewSet, ReviewViewSet, 
+    notification_list, notification_delete, PayWithWalletView, notification_clear_all,
+    AdminDashboardViewSet, WalletViewSet  # 🎯 WalletViewSet buraya eklendi!
+)
 
 router = DefaultRouter()
 router.register(r'categories', CategoryViewSet, basename='category')
 router.register(r'listings', ItemViewSet, basename='item')
 router.register(r'bookings', BookingViewSet, basename='booking')
 router.register(r'conversations', ConversationViewSet, basename='conversation')
-router.register(r'reviews', ReviewViewSet)
+router.register(r'reviews', ReviewViewSet, basename='review')
+router.register(r'admin-dashboard', AdminDashboardViewSet, basename='admin-dashboard')
+router.register(r'wallet', WalletViewSet, basename='wallet')
 
 urlpatterns = [
     # Mağaza detay rotasını router'dan önceye alarak ezilmesini engelliyoruz
     path('stores/<uuid:store_id>/', ItemViewSet.as_view({'get': 'store_detail'}), name='store-detail'),
     
-    # 🎯 YENİ EKLEDİĞİMİZ KISIM: Cüzdanla Ödeme Rotası (Burası UUID bekliyor ve Router'dan önce yazılmalı)
+    # Cüzdanla Ödeme Rotası (Burası UUID bekliyor ve Router'dan önce yazılmalı)
     path('listings/<uuid:item_id>/pay-with-wallet/', PayWithWalletView.as_view(), name='pay_with_wallet'),
 
     path('notifications/', notification_list, name='notifications'),

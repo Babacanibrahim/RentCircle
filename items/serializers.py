@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Category, Item, Booking, ItemImage, Conversation, Message, BookingImage, Review, Notification
+from .models import Category, Item, Booking, ItemImage, Conversation, Message, BookingImage, Review, Notification, ActivityLog
+from users.models import WithdrawalRequest
 from django.contrib.auth import get_user_model
 from django.db.models import Max, Avg
 from django.utils import timezone
@@ -61,6 +62,18 @@ class ReviewSerializer(serializers.ModelSerializer):
         if booking.status != 'completed':
             raise serializers.ValidationError("Sadece tamamlanmış kiralamalar için değerlendirme yapabilirsiniz.")
         return data
+
+class ActivityLogSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    created_at_formatted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ActivityLog
+        fields = ['id', 'username', 'action_type', 'description', 'created_at', 'created_at_formatted']
+
+    def get_created_at_formatted(self, obj):
+        # Saat dilimini düzgün göstermek için formatlama
+        return obj.created_at.strftime("%d.%m.%Y %H:%M:%S")
 
 
 class ItemSerializer(serializers.ModelSerializer):
@@ -294,3 +307,16 @@ class ConversationSerializer(serializers.ModelSerializer):
         except Exception:
             return None
         return None
+
+class WithdrawalRequestSerializer(serializers.ModelSerializer):
+    user_email = serializers.CharField(source='wallet.user.email', read_only=True)
+    user_name = serializers.CharField(source='wallet.user.first_name', read_only=True)
+    user_surname = serializers.CharField(source='wallet.user.last_name', read_only=True)
+    created_at_formatted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WithdrawalRequest
+        fields = ['id', 'user_name', 'user_surname', 'user_email', 'amount', 'iban', 'status', 'created_at', 'created_at_formatted']
+
+    def get_created_at_formatted(self, obj):
+        return obj.created_at.strftime("%d.%m.%Y %H:%M")

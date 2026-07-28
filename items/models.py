@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
+from users.models import WalletTransaction
 
 class Category(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -271,4 +272,66 @@ def create_booking_notification(sender, instance, created, **kwargs):
                 'is_read': False,
                 'created_at': timezone.now()
             }
+        )
+
+# -----------------------------------------------------------
+# 🛡️ SİSTEM AKTİVİTE LOGLARI (GOD MODE İZLEME)
+# -----------------------------------------------------------
+class ActivityLog(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='activity_logs')
+    action_type = models.CharField(max_length=50) 
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Aktivite Logu'
+        verbose_name_plural = 'Aktivite Logları'
+
+    def __str__(self):
+        return f"{self.user.email} - {self.action_type} - {self.created_at}"
+
+# --- OTOMATİK LOG YAKALAYICI SİNYALLER (SIGNALS) ---
+
+@receiver(post_save, sender=Item)
+def log_item_creation(sender, instance, created, **kwargs):
+    if created:
+        ActivityLog.objects.create(
+            user=instance.owner, 
+            action_type="İLAN OLUŞTURDU", 
+            description=f"'{instance.title}' başlıklı yeni bir ilan eklendi."
+        )
+
+@receiver(post_save, sender=Review)
+def log_review_creation(sender, instance, created, **kwargs):
+    if created:
+        ActivityLog.objects.create(
+            user=instance.reviewer, 
+            action_type="YORUM YAPTI", 
+            description=f"'{instance.item.title}' adlı ilana {instance.rating} yıldızlı yorum yaptı."
+        )
+
+@receiver(post_save, sender=Booking)
+def log_booking_creation(sender, instance, created, **kwargs):
+    if created:
+        ActivityLog.objects.create(
+            user=instance.renter, 
+            action_type="KİRALAMA BAŞLATTI", 
+            description=f"'{instance.item.title}' ürününü kiralamak için işlem başlattı. (Tutar: ₺{instance.total_price})"
+        )
+
+# 🎯 SENİN MODELİNE ÖZEL: WalletTransaction tiplerini ayırıyoruz
+@receiver(post_save, sender=WalletTransaction) 
+def log_wallet_transaction(sender, instance, created, **kwargs):
+    if created:
+        # DEPOSIT, INCOME ve REFUND para girişidir. Diğerleri çıkış.
+        if instance.transaction_type in ['DEPOSIT', 'INCOME', 'REFUND']:
+            action = "PARA GİRİŞİ"
+        else:
+            action = "PARA ÇIKIŞI"
+            
+        ActivityLog.objects.create(
+            user=instance.wallet.user, 
+            action_type=action, 
+            description=f"Cüzdan İşlemi: ₺{instance.amount} ({instance.get_transaction_type_display()})"
         )

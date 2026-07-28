@@ -3,7 +3,7 @@ from rest_framework.decorators import APIView, action, api_view, permission_clas
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny , IsAdminUser
 from django.shortcuts import get_object_or_404, redirect
-from django.db.models import Q
+from django.db.models import Q, Sum, Count
 import json
 from django.core.cache import cache
 from datetime import datetime, timedelta
@@ -11,10 +11,12 @@ import iyzipay
 from django.utils import timezone
 from django.db import transaction
 from decimal import Decimal
-from users.models import Wallet, WalletTransaction
+from users.models import Wallet, WalletTransaction, WithdrawalRequest
 from django.contrib.auth import get_user_model
-from .models import Category, Item, Booking, Conversation, Message, ItemImage, BookingImage, Review, Notification
-from .serializers import CategorySerializer, ItemSerializer, BookingSerializer, StoreDetailSerializer, ConversationSerializer, MessageSerializer, ReviewSerializer, NotificationSerializer
+from .models import Category, Item, Booking, Conversation, Message, ItemImage, BookingImage, Review, Notification, ActivityLog, WalletTransaction
+from .serializers import (CategorySerializer, ItemSerializer, BookingSerializer, StoreDetailSerializer, 
+                          ConversationSerializer, MessageSerializer, ReviewSerializer, NotificationSerializer,
+                          ActivityLogSerializer, WithdrawalRequestSerializer)
 
 User = get_user_model()
 
@@ -140,6 +142,11 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        # 🎯 ÇÖZÜM BURADA: Eğer giren kişi YÖNETİCİ ise TÜM işlemleri görebilsin!
+        if user.is_staff:
+            return Booking.objects.all().order_by('-created_at')
+            
+        # Yönetici değilse, sadece taraf olduğu işlemleri görsün
         return Booking.objects.filter(Q(renter=user) | Q(item__owner=user)).order_by('-created_at')
 
     def perform_create(self, serializer):
@@ -784,3 +791,206 @@ class PayWithWalletView(APIView):
             "message": "Kiralama talebiniz başarıyla oluşturuldu.",
             "booking_id": booking.id
         }, status=status.HTTP_201_CREATED)
+
+
+class AdminDashboardViewSet(viewsets.ViewSet):
+    """
+    SADECE YÖNETİCİLERİN (Admin) ERİŞEBİLECEĞİ GOD MODE API'Sİ
+    """
+    permission_classes = [IsAdminUser]
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Platformun genel finansal ve operasyonel istatistiklerini getirir"""
+        pool_balance = Booking.objects.filter(
+            status__in=['pending_approval', 'approved', 'handover_pending', 'return_pending', 'active', 'disputed']
+        ).aggregate(total_rent=Sum('total_price'), total_deposit=Sum('deposit_price'))
+
+        return Response({
+            "users_count": User.objects.count(),
+            "total_items": Item.objects.count(),
+            "active_items": Item.objects.filter(is_available=True, is_banned=False).count(),
+            "active_bookings": Booking.objects.filter(status='active').count(),
+            "pending_disputes": Booking.objects.filter(status='disputed').count(),
+            "finances": {
+                "total_wallets": Wallet.objects.aggregate(total=Sum('balance'))['total'] or Decimal('0.00'),
+                "pool_rent": pool_balance['total_rent'] or Decimal('0.00'),
+                "pool_deposit": pool_balance['total_deposit'] or Decimal('0.00'),
+            }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def users_list(self, request):
+        """Tüm kullanıcıları Cüzdanlarıyla beraber (Tek Sorguda) getirir"""
+        search = request.query_params.get('search', '').lower()
+        users = User.objects.select_related('wallet').all().order_by('-date_joined')
+        
+        if search:
+            users = users.filter(Q(username__icontains=search) | Q(first_name__icontains=search) | Q(email__icontains=search))
+            
+        data = [{
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "is_staff": u.is_staff,
+            "trust_score": getattr(u, 'trust_score', 5.0),
+            "wallet_balance": u.wallet.balance if hasattr(u, 'wallet') else Decimal('0.00'),
+            "date_joined": u.date_joined.strftime('%Y-%m-%d %H:%M')
+        } for u in users]
+        
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def update_user(self, request):
+        """Kullanıcının verilerini günceller"""
+        target_user = get_object_or_404(User, id=request.data.get('user_id'))
+        
+        if target_user == request.user and request.data.get('is_staff') is False:
+            return Response({"error": "Sistem Koruması: Kendi yöneticilik yetkinizi alamazsınız."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        target_user.is_staff = request.data.get('is_staff', target_user.is_staff)
+        target_user.trust_score = request.data.get('trust_score', getattr(target_user, 'trust_score', 5.0))
+        target_user.save()
+        
+        if 'wallet_balance' in request.data:
+            wallet, _ = Wallet.objects.get_or_create(user=target_user)
+            wallet.balance = request.data.get('wallet_balance')
+            wallet.save()
+            
+        return Response({"message": "Kullanıcı başarıyla güncellendi."})
+
+    @action(detail=False, methods=['get'])
+    def items_list(self, request):
+        """Tüm ilanları optimize edilmiş şekilde getirir"""
+        search = request.query_params.get('search', '').lower()
+        items = Item.objects.select_related('owner', 'category').all().order_by('-created_at')
+        if search:
+            items = items.filter(Q(title__icontains=search) | Q(owner__username__icontains=search))
+            
+        serializer = ItemSerializer(items, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def admin_update_item(self, request):
+        """İlanı zorla günceller"""
+        item = get_object_or_404(Item, id=request.data.get('item_id'))
+        
+        for field in ['title', 'description', 'price_per_day', 'city', 'is_available']:
+            if field in request.data:
+                setattr(item, field, request.data.get(field))
+                
+        if 'is_banned' in request.data:
+            item.is_banned = request.data.get('is_banned')
+            if item.is_banned:
+                item.is_available = False
+                
+        item.save()
+        return Response({"message": "İlan başarıyla güncellendi."})
+
+    @action(detail=False, methods=['delete'])
+    def delete_item(self, request):
+        get_object_or_404(Item, id=request.query_params.get('item_id')).delete()
+        return Response({"message": "İlan kalıcı olarak silindi."})
+
+    @action(detail=False, methods=['delete'])
+    def delete_user(self, request):
+        user = get_object_or_404(User, id=request.query_params.get('user_id'))
+        if user == request.user:
+            return Response({"error": "Sistem Koruması: Kendi hesabınızı silemezsiniz."}, status=status.HTTP_400_BAD_REQUEST)
+        user.delete()
+        return Response({"message": "Kullanıcı kalıcı olarak silindi."})
+
+    @action(detail=False, methods=['get'])
+    def disputed_bookings(self, request):
+        """Çözüm bekleyen anlaşmazlıkları getirir"""
+        disputes = Booking.objects.select_related('item', 'renter').filter(status='disputed').order_by('-updated_at')
+        serializer = BookingSerializer(disputes, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def system_logs(self, request):
+        """Global Terminal Logları (Son 500)"""
+        logs = ActivityLog.objects.select_related('user').all()[:500]
+        serializer = ActivityLogSerializer(logs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def user_logs(self, request):
+        """Seçili kullanıcının logları"""
+        user_id = request.query_params.get('user_id')
+        logs = ActivityLog.objects.filter(user_id=user_id).order_by('-created_at')[:200]
+        serializer = ActivityLogSerializer(logs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def withdrawals_list(self, request):
+        """Para çekme taleplerini getirir"""
+        withdrawals = WithdrawalRequest.objects.select_related('wallet__user').all().order_by('-created_at')
+        serializer = WithdrawalRequestSerializer(withdrawals, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def handle_withdrawal(self, request):
+        """Para çekme talebini Onayla veya Reddet"""
+        withdrawal = get_object_or_404(WithdrawalRequest, id=request.data.get('request_id'))
+        action_type = request.data.get('action') 
+        reason = request.data.get('reason', '')
+
+        if withdrawal.status != 'PENDING':
+            return Response({"error": "Bu talep zaten işlenmiş."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if action_type == 'approve':
+            withdrawal.status = 'APPROVED'
+            withdrawal.save()
+            Notification.objects.create(user=withdrawal.wallet.user, notification_type='wallet', reference_id=str(withdrawal.id), message=f"₺{withdrawal.amount} tutarındaki para çekme talebiniz onaylandı ve IBAN'ınıza iletildi.")
+        
+        elif action_type == 'reject':
+            withdrawal.status = 'REJECTED'
+            withdrawal.save()
+            
+            # Parayı cüzdana geri iade et
+            withdrawal.wallet.balance += withdrawal.amount
+            withdrawal.wallet.save()
+            
+            WalletTransaction.objects.create(wallet=withdrawal.wallet, transaction_type='REFUND', amount=withdrawal.amount, description=f"Reddedilen Çekim Talebi İadesi. Sebep: {reason}")
+            Notification.objects.create(user=withdrawal.wallet.user, notification_type='wallet', reference_id=str(withdrawal.id), message=f"₺{withdrawal.amount} para çekme talebiniz reddedildi. Tutar cüzdanınıza iade edildi. Sebep: {reason}")
+            
+        return Response({"message": "Para çekme talebi başarıyla işlendi."})
+
+
+class WalletViewSet(viewsets.ViewSet):
+    """
+    Kullanıcıların Cüzdan ve Para Çekme İşlemleri
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['post'])
+    def request_withdrawal(self, request):
+        """Kullanıcının IBAN'a para çekme talebi oluşturması"""
+        amount = Decimal(str(request.data.get('amount', '0')))
+        iban = request.data.get('iban', '').strip()
+
+        if amount <= 0: 
+            return Response({"error": "Geçerli bir tutar girin."}, status=status.HTTP_400_BAD_REQUEST)
+        if not iban: 
+            return Response({"error": "IBAN adresi gereklidir."}, status=status.HTTP_400_BAD_REQUEST)
+
+        wallet = request.user.wallet
+        if wallet.balance < amount:
+            return Response({"error": "Cüzdanınızda yeterli bakiye bulunmuyor."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 1. Parayı cüzdandan düş ve işlemi logla
+        wallet.balance -= amount
+        wallet.save()
+        
+        WalletTransaction.objects.create(
+            wallet=wallet, transaction_type='WITHDRAWAL', amount=amount,
+            description=f"IBAN'a ({iban[-4:]}) para çekme talebi."
+        )
+        
+        # 2. Yönetici (Admin) için Talebi oluştur
+        WithdrawalRequest.objects.create(wallet=wallet, amount=amount, iban=iban)
+
+        return Response({"message": "Para çekme talebiniz alındı ve finans birimine iletildi."}, status=status.HTTP_200_OK)
