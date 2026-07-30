@@ -23,6 +23,8 @@ import ForgotPassword from "./features/auth/views/ForgotPassword";
 import MyListings from "./features/items/views/MyListings";
 import WalletDashboard from "./features/items/views/WalletDashboard";
 import NotFound from "./features/components/NotFound";
+import AdminUserDetail from "./features/admin/views/AdminUserDetail";
+import AdminItemDetail from "./features/admin/views/AdminItemDetail";
 
 function App() {
   const isAuthenticated = !!(localStorage.getItem("access_token") || sessionStorage.getItem("access_token"));
@@ -64,6 +66,23 @@ function App() {
           element={
             <PrivateRoute>
               <AdminDashboard />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/admin-dashboard/users/:id"
+          element={
+            <PrivateRoute>
+              <AdminUserDetail />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/admin-dashboard/items/:id"
+          element={
+            <PrivateRoute>
+              <AdminItemDetail />
             </PrivateRoute>
           }
         />

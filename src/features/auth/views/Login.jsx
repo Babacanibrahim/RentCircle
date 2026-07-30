@@ -10,9 +10,8 @@ const Login = () => {
 
   const [loginInput, setLoginInput] = useState("");
   const [password, setPassword] = useState("");
-
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false); // UI için durabilir, istersen kaldırabilirsin
+  const [rememberMe, setRememberMe] = useState(false);
 
   useEffect(() => {
     const isActivated = searchParams.get("activated");
@@ -35,25 +34,39 @@ const Login = () => {
     };
 
     try {
+      // 1. Sadece login ol ve tokenları al (Henüz localStorage'a YAZMA!)
       const data = await authApi.login(payload);
 
-      // 1. Önce eski kalıntıları temizle (Hem local hem session)
+      // 2. Token'ı kullanarak profili gizlice çek
+      let isStaff = false;
+      try {
+        const userProfile = await authApi.getProfile(data.access);
+        if (userProfile.is_staff === true || userProfile?.user?.is_staff === true) {
+          isStaff = true;
+        }
+      } catch (profileErr) {
+        console.error("Profil çekilemedi, normal kullanıcı varsayılıyor.", profileErr);
+      }
+
+      // 3. Admin mi Normal mi olduğunu öğrendik. Şimdi temizlik yap ve kaydet.
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
       sessionStorage.removeItem("access_token");
       sessionStorage.removeItem("refresh_token");
 
-      // 2. 🎯 YENİ: Sekmeler arası senkronizasyon için HER ZAMAN localStorage kullan!
-      // Gizli sekme veya farklı tarayıcılar zaten kendi izole localStorage'larına sahip oldukları için
-      // oralarda oturum kapalı görünecektir (Tam istediğin gibi).
       localStorage.setItem("access_token", data.access);
       localStorage.setItem("refresh_token", data.refresh);
 
       toast.fire({ icon: "success", title: "Giriş başarılı! Yönlendiriliyorsunuz..." });
 
+      // 4. Toast mesajının görünmesi için çok kısa bir süre bekleyip anında ışınlıyoruz!
       setTimeout(() => {
-        window.location.href = "/dashboard";
-      }, 1500);
+        if (isStaff) {
+          window.location.href = "/admin-dashboard";
+        } else {
+          window.location.href = "/dashboard";
+        }
+      }, 500);
     } catch (err) {
       console.error("Giriş Hatası Detayı:", err.response?.data);
       let errMsg = "Giriş yapılamadı. Lütfen bilgilerinizi kontrol edin.";

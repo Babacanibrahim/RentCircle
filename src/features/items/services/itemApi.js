@@ -22,6 +22,9 @@ export const itemApi = {
     return res.data; 
   },
   getCategories: async () => (await axiosInstance.get("items/categories/")).data,
+  createCategory: async (data) => (await axiosInstance.post("items/categories/", data, getAuthHeader())).data,
+  updateCategory: async (id, data) => (await axiosInstance.patch(`items/categories/${id}/`, data, getAuthHeader())).data,
+  deleteCategory: async (id) => (await axiosInstance.delete(`items/categories/${id}/`, getAuthHeader())).data,
   getListingDetail: async (id) => (await axiosInstance.get(`items/listings/${id}/`)).data,
   getStoreDetail: async (ownerId) => (await axiosInstance.get(`items/stores/${ownerId}/`)).data,
   getMyListings: async () => (await axiosInstance.get('items/listings/my_listings/', getAuthHeader())).data,
@@ -80,4 +83,24 @@ export const itemApi = {
   requestWithdrawal: async (data) => (await axiosInstance.post('items/wallet/request_withdrawal/', data, getAuthHeader())).data,
   getAdminWithdrawals: async () => (await axiosInstance.get(`items/admin-dashboard/withdrawals_list/`, getAuthHeader())).data,
   handleAdminWithdrawal: async (data) => (await axiosInstance.post(`items/admin-dashboard/handle_withdrawal/`, data, getAuthHeader())).data,
+  submitReport: async (data) => (await axiosInstance.post("items/reports/submit/", data, getAuthHeader())).data,
+  getAdminReports: async () => (await axiosInstance.get(`items/admin-dashboard/reports_list/`, getAuthHeader())).data,
+  handleAdminReport: async (data) => (await axiosInstance.post(`items/admin-dashboard/handle_report/`, data, getAuthHeader())).data,
+  createTicket: async (formData) => {
+      const response = await axiosInstance.post(`items/tickets/`, formData, {
+          headers: { "Content-Type": "multipart/form-data", ...getAuthHeader().headers }
+      });
+      return response.data;
+  },
+  submitReport: async (formData) => {
+      const response = await axiosInstance.post(`items/reports/submit/`, formData, {
+          headers: { "Content-Type": "multipart/form-data", ...getAuthHeader().headers }
+      });
+      return response.data;
+  },
+  getAdminTickets: async () => (await axiosInstance.get(`items/tickets/`, getAuthHeader())).data,
+  adminCloseTicket: async (id) => (await axiosInstance.patch(`items/tickets/${id}/`, { status: 'closed' }, getAuthHeader())).data,
+  manageWallet: async (data) => (await axiosInstance.post(`items/admin-dashboard/manage_wallet/`, data, getAuthHeader())).data,
+  banEntity: async (data) => (await axiosInstance.post(`items/admin-dashboard/ban_entity/`, data, getAuthHeader())).data,
+  replyToSupport: async (data) => (await axiosInstance.post(`items/admin-dashboard/reply_to_support/`, data, getAuthHeader())).data,
 };

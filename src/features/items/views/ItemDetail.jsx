@@ -40,6 +40,11 @@ const ItemDetail = () => {
   const [offerDates, setOfferDates] = useState({ start_date: "", end_date: "" });
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
 
+  // 🚩 YENİ: Şikayet (Report) State'leri
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportForm, setReportForm] = useState({ reason: "", description: "", proof_image: null });
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+
   useEffect(() => {
     const fetchDetail = async () => {
       try {
@@ -67,31 +72,22 @@ const ItemDetail = () => {
     }
   }, [id]);
 
-  // Takvimden seçilen tarihlere göre Fiyat Önizlemesi
   useEffect(() => {
     if (startDate && endDate && item) {
       const diffTime = Math.abs(endDate - startDate);
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-
       const basePrice = diffDays * parseFloat(item.price_per_day);
       const depositAmount = basePrice * 0.15;
-
-      setPreviewPrice({
-        base: basePrice,
-        deposit: depositAmount,
-        total: basePrice + depositAmount,
-      });
+      setPreviewPrice({ base: basePrice, deposit: depositAmount, total: basePrice + depositAmount });
     } else {
       setPreviewPrice({ base: 0, deposit: 0, total: 0 });
     }
   }, [startDate, endDate, item]);
 
-  // Teklif tarihlerine göre otomatik fiyat hesaplama
   useEffect(() => {
     if (offerDates.start_date && offerDates.end_date && item?.price_per_day) {
       const start = new Date(offerDates.start_date);
       const end = new Date(offerDates.end_date);
-
       if (end >= start) {
         const diffTime = Math.abs(end - start);
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
@@ -122,27 +118,20 @@ const ItemDetail = () => {
     try {
       await itemApi.toggleFavorite(item.id, token);
       setIsFavorite(!isFavorite);
-    } catch (err) {
-      console.error("Favori işlemi başarısız:", err);
-    }
+    } catch (err) {}
   };
 
-  // 🎯 YENİ: Native Share API Entegrasyonu
   const handleShare = async () => {
     const shareData = {
       title: item.title,
       text: `RentCircle'da bu harika ilana göz at: ${item.title} - Sadece ₺${item.price_per_day}/Gün!`,
       url: window.location.href,
     };
-
     if (navigator.share) {
       try {
         await navigator.share(shareData);
-      } catch (err) {
-        // Kullanıcı paylaşım penceresini kapattığında sessizce geç
-      }
+      } catch (err) {}
     } else {
-      // Tarayıcı desteklemiyorsa linki kopyala
       navigator.clipboard.writeText(shareData.url);
       toast.fire({ icon: "success", title: "İlan bağlantısı panoya kopyalandı!" });
     }
@@ -161,16 +150,14 @@ const ItemDetail = () => {
         navigate(`/chat?new_item=${item.id}&title=${encodeURIComponent(item.title)}`);
       }
     } catch (err) {
-      console.error("Sohbet kontrol hatası:", err);
       navigate("/chat");
     }
   };
 
   const handleSendOffer = async (e) => {
     e.preventDefault();
-    if (!offerPrice || !offerDates.start_date || !offerDates.end_date) {
-      return toast.fire({ icon: "warning", title: "Lütfen tarihleri ve teklif tutarınızı eksiksiz girin." });
-    }
+    if (!offerPrice || !offerDates.start_date || !offerDates.end_date)
+      return toast.fire({ icon: "warning", title: "Lütfen eksiksiz girin." });
 
     setIsSubmittingOffer(true);
     try {
@@ -182,55 +169,77 @@ const ItemDetail = () => {
         start_date: offerDates.start_date,
         end_date: offerDates.end_date,
       };
-
       const result = await itemApi.sendDirectMessage(payload);
       setIsOfferModalOpen(false);
-
       const confirmNav = await cyberConfirm.fire({
         title: "Teklif Gönderildi! 🎉",
-        text: "Teklifiniz satıcıya başarıyla iletildi. Sohbet sayfasına gitmek ister misiniz?",
+        text: "Teklifiniz iletildi. Sohbet sayfasına gitmek ister misiniz?",
         icon: "success",
         showCancelButton: true,
         confirmButtonText: "💬 Sohbete Git",
-        cancelButtonText: "Sayfada Kal",
+        cancelButtonText: "Burada Kal",
       });
-
-      if (confirmNav.isConfirmed) {
-        navigate(`/chat?conv_id=${result.conversation_id}`);
-      }
+      if (confirmNav.isConfirmed) navigate(`/chat?conv_id=${result.conversation_id}`);
     } catch (error) {
-      toast.fire({ icon: "error", title: "Teklif gönderilirken bir hata oluştu." });
+      toast.fire({ icon: "error", title: "Teklif gönderilemedi." });
     } finally {
       setIsSubmittingOffer(false);
     }
   };
 
-  if (loading) {
+  // 🚩 YENİ: Şikayet Gönderme İşlemi
+  const handleReportSubmit = async (e) => {
+    e.preventDefault();
+    if (!reportForm.reason) return toast.fire({ icon: "warning", title: "Lütfen bir şikayet sebebi seçin." });
+
+    setIsSubmittingReport(true);
+    try {
+      const formData = new FormData();
+      formData.append("target_type", "item"); // Veya 'user'
+
+      // BURAYA DİKKAT: item.id veya store.id'nin gerçekten dolu olduğundan emin ol!
+      formData.append("item_id", item.id);
+
+      formData.append("reason", reportForm.reason);
+      formData.append("description", reportForm.description);
+      if (reportForm.proof_image) {
+        formData.append("proof_image", reportForm.proof_image);
+      }
+
+      await itemApi.submitReport(formData);
+      toast.fire({ icon: "success", title: "Şikayetiniz yönetime iletildi." });
+      setIsReportModalOpen(false);
+      setReportForm({ reason: "", description: "", proof_image: null });
+    } catch (err) {
+      // 🎯 BURAYI DEĞİŞTİRDİK:
+      console.error("ŞİKAYET HATASI DETAYI:", err.response?.data);
+
+      // Backend'den gelen özel bir hata mesajı varsa onu göster, yoksa varsayılanı göster
+      const errorMsg = err.response?.data?.error || "Şikayet gönderilirken bir hata oluştu.";
+      toast.fire({ icon: "error", title: errorMsg });
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
+
+  if (loading)
     return (
       <div className="w-full relative flex items-center justify-center font-mono text-xs tracking-widest text-slate-400 animate-pulse pt-20">
         İLAN DETAYLARI YÜKLENİYOR...
       </div>
     );
-  }
-
   if (!item) return <div className="w-full relative text-center pt-20 text-slate-500 font-mono">Ürün bulunamadı.</div>;
 
   const activeImage = item.images?.[currentImgIndex]?.image || "";
-
-  const excludedIntervals =
-    item?.booked_dates?.map((range) => ({
-      start: parseISO(range.start),
-      end: parseISO(range.end),
-    })) || [];
+  const excludedIntervals = item?.booked_dates?.map((range) => ({ start: parseISO(range.start), end: parseISO(range.end) })) || [];
 
   return (
     <div className="w-full relative selection:bg-blue-500/30">
       <div className="p-6 lg:p-12">
         <div className="max-w-7xl mx-auto space-y-12 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* SOL KISIM: GÖRSELLER, HARİTA VE YORUMLAR */}
+            {/* SOL KISIM */}
             <div className="lg:col-span-7 space-y-6">
-              {/* Görsel Alanı */}
               <div className="space-y-4">
                 <div className="cyber-card relative h-[480px] w-full flex items-center justify-center group overflow-hidden border border-slate-700/50 hover:border-slate-500/50 transition-colors">
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 to-transparent z-10 pointer-events-none" />
@@ -246,17 +255,17 @@ const ItemDetail = () => {
                         <>
                           <button
                             onClick={prevImage}
-                            className="absolute left-4 z-20 btn-slate p-3 rounded-full opacity-0 group-hover:opacity-100 cursor-pointer hover:bg-slate-700 hover:text-white transition-all active:scale-90">
+                            className="absolute left-4 z-20 btn-slate p-3 rounded-full opacity-0 group-hover:opacity-100 transition-all">
                             ◀
                           </button>
                           <button
                             onClick={nextImage}
-                            className="absolute right-4 z-20 btn-slate p-3 rounded-full opacity-0 group-hover:opacity-100 cursor-pointer hover:bg-slate-700 hover:text-white transition-all active:scale-90">
+                            className="absolute right-4 z-20 btn-slate p-3 rounded-full opacity-0 group-hover:opacity-100 transition-all">
                             ▶
                           </button>
                         </>
                       )}
-                      <div className="absolute top-4 right-4 z-20 bg-slate-950/80 border border-slate-700/50 px-3 py-1.5 rounded-lg text-[10px] font-mono tracking-wider text-slate-400 pointer-events-none">
+                      <div className="absolute top-4 right-4 z-20 bg-slate-950/80 border border-slate-700/50 px-3 py-1.5 rounded-lg text-[10px] font-mono tracking-wider text-slate-400">
                         🔍 BÜYÜT
                       </div>
                     </>
@@ -270,7 +279,7 @@ const ItemDetail = () => {
                     <button
                       key={img.id}
                       onClick={() => setCurrentImgIndex(idx)}
-                      className={`cyber-card cursor-pointer relative w-20 h-20 overflow-hidden flex-shrink-0 !rounded-xl transition-all hover:scale-105 active:scale-95 ${currentImgIndex === idx ? "border-blue-500 ring-1 ring-blue-500/50 shadow-md shadow-blue-500/20" : "hover:border-slate-500"}`}>
+                      className={`cyber-card cursor-pointer relative w-20 h-20 overflow-hidden flex-shrink-0 !rounded-xl transition-all hover:scale-105 active:scale-95 ${currentImgIndex === idx ? "border-blue-500 ring-1 ring-blue-500/50 shadow-md" : "hover:border-slate-500"}`}>
                       <img src={img.image} alt="thumbnail" className="w-full h-full object-cover" />
                     </button>
                   ))}
@@ -279,10 +288,7 @@ const ItemDetail = () => {
 
               {/* Harita Bölümü */}
               <div className="space-y-4 pt-4 border-t border-slate-700/50">
-                <div className="flex items-center justify-between cursor-default">
-                  <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">🗺️ Konum Bilgisi</h2>
-                </div>
-
+                <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">🗺️ Konum Bilgisi</h2>
                 {(item.region || item.full_address) && (
                   <div className="bg-slate-900/50 border border-slate-700/50 p-3 rounded-xl flex items-start gap-3">
                     <span className="text-lg mt-0.5">📍</span>
@@ -290,13 +296,12 @@ const ItemDetail = () => {
                       <p className="text-xs font-bold text-slate-200">
                         {item.city}, {item.district}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                        {item.region ? `${item.region} Mah.` : ""} {item.full_address ? item.full_address : ""}
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        {item.region ? `${item.region} Mah.` : ""} {item.full_address}
                       </p>
                     </div>
                   </div>
                 )}
-
                 <div className="cyber-card overflow-hidden h-[300px] border border-slate-700/50 relative z-0">
                   {item.latitude && item.longitude ? (
                     <MapContainer
@@ -304,7 +309,7 @@ const ItemDetail = () => {
                       zoom={15}
                       scrollWheelZoom={false}
                       className="w-full h-full rounded-xl">
-                      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OSM" />
+                      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                       <Marker position={[parseFloat(item.latitude), parseFloat(item.longitude)]}>
                         <Popup>
                           <div className="text-center font-bold font-mono">
@@ -314,28 +319,22 @@ const ItemDetail = () => {
                       </Marker>
                     </MapContainer>
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs font-mono cursor-default">
-                      Bu ilan için detaylı konum belirtilmemiş.
+                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs font-mono">
+                      Detaylı konum belirtilmemiş.
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* 🎯 YENİ VE DÜZELTİLMİŞ: Ürün Yorumları Bölümü */}
+              {/* Yorumlar Bölümü */}
               <div className="space-y-4 pt-4 border-t border-slate-700/50 mt-6">
-                <div className="flex items-center justify-between cursor-default">
-                  <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">⭐ Ürün Değerlendirmeleri</h2>
-                </div>
+                <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">⭐ Ürün Değerlendirmeleri</h2>
                 {item.reviews && item.reviews.length > 0 ? (
                   <div className="space-y-3 max-h-80 overflow-y-auto scrollbar-thin pr-2">
                     {item.reviews.map((review) => {
-                      // 🎯 DÜZELTME: İsimleri StoreDetail'deki gibi çekiyoruz
                       const reviewerName = review.reviewer_show_name
                         ? `${review.reviewer_first_name} ${review.reviewer_last_name?.[0]}.`
                         : `@${review.reviewer_username}`;
-
-                      const reviewerInitial = review.reviewer_show_name ? review.reviewer_first_name?.[0] : review.reviewer_username?.[0];
-
                       return (
                         <div
                           key={review.id}
@@ -343,11 +342,11 @@ const ItemDetail = () => {
                           <div className="flex justify-between items-start mb-2">
                             <div className="flex items-center gap-2">
                               <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-[10px] uppercase shadow-inner">
-                                {reviewerInitial || "K"}
+                                {reviewerName[0]}
                               </div>
-                              <span className="text-xs font-bold text-slate-200">{reviewerName || "Kullanıcı"}</span>
+                              <span className="text-xs font-bold text-slate-200">{reviewerName}</span>
                             </div>
-                            <span className="text-amber-400 text-[10px] tracking-widest">{"⭐".repeat(review.rating)}</span>
+                            <span className="text-amber-400 text-[10px]">{"⭐".repeat(review.rating)}</span>
                           </div>
                           <p className="text-xs text-slate-300 italic">"{review.comment || "Sadece puanlama yapıldı."}"</p>
                           <span className="text-[9px] text-slate-500 mt-2 block font-mono text-right">
@@ -365,35 +364,33 @@ const ItemDetail = () => {
               </div>
             </div>
 
-            {/* SAĞ KISIM: İLAN BİLGİLERİ VE BUTONLAR */}
+            {/* SAĞ KISIM */}
             <div className="lg:col-span-5 space-y-6">
               <div className="cyber-card p-6 space-y-5">
                 <div className="flex items-center justify-between cursor-default">
-                  <span className="text-[10px] font-bold tracking-widest text-blue-400 uppercase bg-blue-500/10 px-3 py-1 rounded-lg border border-blue-500/20 hover:bg-blue-500/20 transition-colors">
+                  <span className="text-[10px] font-bold tracking-widest text-blue-400 uppercase bg-blue-500/10 px-3 py-1 rounded-lg border border-blue-500/20">
                     ⚡ {item.category_detail?.name || "Kategori"}
                   </span>
                 </div>
 
-                <h1 className="text-2xl font-black tracking-tight text-slate-100 cursor-default">{item.title}</h1>
+                <h1 className="text-2xl font-black tracking-tight text-slate-100">{item.title}</h1>
 
-                {/* 🎯 YENİ: Paylaş ve Favori Butonları Yanyana */}
                 <div className="flex gap-3">
                   <button
                     onClick={handleFavoriteToggle}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border transition-all cursor-pointer hover:scale-[1.02] active:scale-95 ${isFavorite ? "bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20" : "bg-slate-800/40 border-slate-700/50 text-slate-300 hover:bg-slate-700/60 hover:text-white"}`}>
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border transition-all hover:scale-[1.02] active:scale-95 ${isFavorite ? "bg-rose-500/10 border-rose-500/30 text-rose-400" : "bg-slate-800/40 border-slate-700/50 text-slate-300 hover:text-white"}`}>
                     <span className={isFavorite ? "animate-pulse" : ""}>{isFavorite ? "❤️" : "🤍"}</span>
                     <span className="text-xs font-bold tracking-wide">{isFavorite ? "Favorilerde" : "Favoriye Ekle"}</span>
                   </button>
                   <button
                     onClick={handleShare}
-                    className="btn-slate flex-1 flex items-center justify-center gap-2 !py-2.5 hover:bg-blue-500/10 hover:border-blue-500/40 hover:text-blue-400 transition-all cursor-pointer active:scale-95"
-                    title="İlanı Paylaş">
+                    className="btn-slate flex-1 flex items-center justify-center gap-2 !py-2.5 hover:bg-blue-500/10 hover:border-blue-500/40 hover:text-blue-400 transition-all active:scale-95">
                     <span className="text-lg mt-0.5">📤</span>
                     <span className="text-xs font-bold tracking-wide">Paylaş</span>
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 bg-slate-950/40 p-4 border border-slate-700/50 rounded-2xl cursor-default hover:bg-slate-900/40 transition-colors">
+                <div className="grid grid-cols-2 gap-2 bg-slate-950/40 p-4 border border-slate-700/50 rounded-2xl cursor-default">
                   <div>
                     <span className="text-[10px] uppercase text-slate-400 block font-semibold">Şehir</span>
                     <div className="text-xs font-bold text-slate-200 mt-1">🏙️ {item.city}</div>
@@ -407,13 +404,13 @@ const ItemDetail = () => {
                 </div>
 
                 <div className="space-y-1">
-                  <span className="text-[10px] uppercase text-slate-400 block font-semibold font-mono cursor-default">Ürün Açıklaması</span>
-                  <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/40 p-4 border border-slate-700/50 rounded-2xl h-28 overflow-y-auto scrollbar-thin hover:border-slate-600/50 transition-colors">
+                  <span className="text-[10px] uppercase text-slate-400 block font-semibold font-mono">Ürün Açıklaması</span>
+                  <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/40 p-4 border border-slate-700/50 rounded-2xl h-28 overflow-y-auto scrollbar-thin">
                     {item.description}
                   </p>
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-slate-950/60 border border-slate-700/50 rounded-2xl cursor-default hover:bg-slate-900/60 transition-colors">
+                <div className="flex items-center justify-between p-4 bg-slate-950/60 border border-slate-700/50 rounded-2xl">
                   <span className="text-xs text-slate-400 font-medium">Günlük Kiralama Bedeli</span>
                   <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400">
                     ₺{parseFloat(item.price_per_day).toLocaleString("tr-TR")}
@@ -425,7 +422,7 @@ const ItemDetail = () => {
               <div className="cyber-card p-5 flex flex-col gap-4">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center font-bold text-sm text-white shadow-lg uppercase cursor-default">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center font-bold text-sm text-white shadow-lg uppercase">
                       {item.owner_show_name ? item.owner_first_name?.[0] : item.owner_username?.[0] || "S"}
                     </div>
                     <div>
@@ -437,7 +434,7 @@ const ItemDetail = () => {
                           ? `${item.owner_first_name} ${item.owner_last_name}`
                           : `@${item.owner_username || "Kullanici"}`}
                       </h3>
-                      <div className="flex items-center gap-1 text-[11px] text-amber-400 font-semibold mt-0.5 cursor-default">
+                      <div className="flex items-center gap-1 text-[11px] text-amber-400 font-semibold mt-0.5">
                         ⭐ {item.owner_rating > 0 ? item.owner_rating : "Yeni"}
                         <span className="text-slate-500 font-normal text-[10px]">({item.owner_review_count || 0})</span>
                       </div>
@@ -448,7 +445,7 @@ const ItemDetail = () => {
                 <div className="grid grid-cols-2 gap-3 mt-2">
                   <button
                     onClick={handleStartChat}
-                    className="btn-slate cursor-pointer hover:bg-blue-600 hover:text-white hover:border-blue-500 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 py-3 shadow-sm">
+                    className="btn-slate cursor-pointer hover:bg-blue-600 hover:text-white hover:border-blue-500 transition-all flex items-center justify-center gap-2 py-3 shadow-sm active:scale-95">
                     💬 Mesaj At
                   </button>
                   <button
@@ -457,36 +454,27 @@ const ItemDetail = () => {
                       if (!token) return toast.fire({ icon: "info", title: "Teklif vermek için giriş yapmalısınız." });
                       if (currentUserId === item.owner)
                         return toast.fire({ icon: "warning", title: "Kendi ilanınıza teklif veremezsiniz." });
-
-                      // Eğer takvimden tarih seçildiyse modal'ı o tarihlerle aç
                       if (startDate && endDate) {
-                        setOfferDates({
-                          start_date: startDate.toISOString().split("T")[0],
-                          end_date: endDate.toISOString().split("T")[0],
-                        });
+                        setOfferDates({ start_date: startDate.toISOString().split("T")[0], end_date: endDate.toISOString().split("T")[0] });
                       }
                       setIsOfferModalOpen(true);
                     }}
-                    className="btn-gradient cursor-pointer !bg-amber-500 !border-amber-500 hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 py-3 shadow-lg shadow-amber-500/20 transition-all">
+                    className="btn-gradient !bg-amber-500 !border-amber-500 flex items-center justify-center gap-2 py-3 shadow-lg hover:scale-[1.02] active:scale-95 transition-all">
                     🤝 Teklif Ver
                   </button>
                 </div>
               </div>
 
-              {/* 🎯 YENİ: Takvim ve Fiyat Önizlemesi (Direkt ödeme kaldırıldı) */}
+              {/* TAKVİM */}
               <div className="cyber-card p-6 space-y-4">
-                <h2 className="text-xs font-bold tracking-widest text-slate-300 uppercase font-mono cursor-default">📅 Müsaitlik Durumu</h2>
-
-                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[11px] text-blue-300 cursor-default">
-                  ℹ️ Tarih seçerek fiyat tahmini alabilir ve seçtiğiniz tarihler için doğrudan satıcıya <strong>Teklif</strong>{" "}
-                  gönderebilirsiniz.
+                <h2 className="text-xs font-bold tracking-widest text-slate-300 uppercase font-mono">📅 Müsaitlik Durumu</h2>
+                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[11px] text-blue-300">
+                  ℹ️ Tarih seçerek fiyat tahmini alabilir ve satıcıya teklif gönderebilirsiniz.
                 </div>
-
-                <div className="w-full bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 shadow-inner">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block cursor-default text-center">
-                    Kiralamak İstediğiniz Tarihleri Seçin
+                <div className="w-full bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block text-center">
+                    Kiralamak İstediğiniz Tarihler
                   </label>
-
                   <DatePicker
                     selectsRange={true}
                     startDate={startDate}
@@ -497,14 +485,13 @@ const ItemDetail = () => {
                     inline
                   />
                 </div>
-
                 <AnimatePresence>
                   {previewPrice.total > 0 && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
-                      className="bg-slate-900/80 border border-slate-700/50 p-4 rounded-xl mt-3 space-y-2 overflow-hidden cursor-default hover:bg-slate-900 transition-colors">
+                      className="bg-slate-900/80 border border-slate-700/50 p-4 rounded-xl space-y-2 overflow-hidden hover:bg-slate-900 transition-colors">
                       <div className="flex justify-between text-xs text-slate-400">
                         <span>Tahmini Kira Bedeli</span>
                         <span>₺{previewPrice.base.toLocaleString("tr-TR")}</span>
@@ -517,32 +504,112 @@ const ItemDetail = () => {
                         <span>Genel Toplam</span>
                         <span className="text-blue-400">₺{previewPrice.total.toLocaleString("tr-TR")}</span>
                       </div>
-
                       <button
                         onClick={() => {
                           const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-                          if (!token) return toast.fire({ icon: "info", title: "Teklif vermek için giriş yapmalısınız." });
+                          if (!token) return toast.fire({ icon: "info", title: "Giriş yapmalısınız." });
                           if (currentUserId === item.owner)
                             return toast.fire({ icon: "warning", title: "Kendi ilanınıza teklif veremezsiniz." });
-
                           setOfferDates({
                             start_date: startDate.toISOString().split("T")[0],
                             end_date: endDate.toISOString().split("T")[0],
                           });
                           setIsOfferModalOpen(true);
                         }}
-                        className="btn-gradient w-full mt-3 !bg-amber-500 !border-amber-400 py-2.5 flex items-center justify-center cursor-pointer hover:scale-[1.02] active:scale-95 transition-transform shadow-lg shadow-amber-500/20">
-                        <span className="font-bold text-xs uppercase tracking-wider">Bu Tarihler İçin Teklif Ver 🤝</span>
+                        className="btn-gradient w-full mt-3 !bg-amber-500 !border-amber-400 py-2.5 shadow-lg active:scale-95 transition-transform">
+                        <span className="font-bold text-xs uppercase">Bu Tarihler İçin Teklif Ver 🤝</span>
                       </button>
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
+
+              {/* 🚩 YENİ: İLANI ŞİKAYET ET BUTONU */}
+              <div className="text-center pt-2">
+                <button
+                  onClick={() => {
+                    const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+                    if (!token) return toast.fire({ icon: "info", title: "Şikayet etmek için giriş yapmalısınız." });
+                    setIsReportModalOpen(true);
+                  }}
+                  className="text-[10px] text-slate-500 font-bold hover:text-rose-500 transition-colors underline decoration-dashed underline-offset-4">
+                  🚩 Bu ilanda bir sorun mu var? Şikayet Et
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* TEKLİF VER MODALI */}
+        {/* 🚩 İLAN ŞİKAYET MODALI */}
+        <AnimatePresence>
+          {isReportModalOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="cyber-card p-6 w-full max-w-sm border border-rose-500/30 shadow-2xl shadow-rose-500/10">
+                <h3 className="text-lg font-black text-rose-400 mb-1">🚩 İlanı Şikayet Et</h3>
+                <p className="text-[10px] text-slate-400 mb-6">Bu ilanın kurallarımızı ihlal ettiğini düşünüyorsanız yönetime bildirin.</p>
+                <form onSubmit={handleReportSubmit} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-slate-400">Şikayet Sebebi</label>
+                    <select
+                      required
+                      value={reportForm.reason}
+                      onChange={(e) => setReportForm({ ...reportForm, reason: e.target.value })}
+                      className="cyber-input w-full text-xs cursor-pointer focus:border-rose-500">
+                      <option value="" disabled>
+                        Sebep Seçin...
+                      </option>
+                      <option value="Sahte Ürün / Dolandırıcılık">Sahte Ürün / Dolandırıcılık Şüphesi</option>
+                      <option value="Yanıltıcı Görsel / Açıklama">Yanıltıcı Görsel veya Açıklama</option>
+                      <option value="Uygunsuz İçerik">Uygunsuz / Yasadışı İçerik</option>
+                      <option value="Yanlış Kategori / Fiyat">Yanlış Kategori veya Fiyat Manipülasyonu</option>
+                      <option value="Diğer">Diğer</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-slate-400">Detaylı Açıklama (Opsiyonel)</label>
+                    <textarea
+                      rows="3"
+                      placeholder="Yöneticilerin incelemesine yardımcı olacak detaylar..."
+                      value={reportForm.description}
+                      onChange={(e) => setReportForm({ ...reportForm, description: e.target.value })}
+                      className="cyber-input w-full text-xs focus:border-rose-500 resize-none"></textarea>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-slate-400">Kanıt Görseli Ekleyin (İsteğe Bağlı, Max 1)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setReportForm({ ...reportForm, proof_image: e.target.files[0] })}
+                      className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-500/10 file:text-blue-400 hover:file:bg-blue-500/20 cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsReportModalOpen(false)}
+                      className="btn-slate flex-1 hover:bg-slate-700 transition-all">
+                      İptal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSubmittingReport}
+                      className="btn-gradient flex-1 !bg-rose-600 !border-rose-500 hover:scale-105 active:scale-95 transition-transform disabled:opacity-50">
+                      {isSubmittingReport ? "İletiliyor..." : "Gönder"}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* TEKLİF VER MODALI (Aynı kaldı) */}
         <AnimatePresence>
           {isOfferModalOpen && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -550,12 +617,11 @@ const ItemDetail = () => {
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.9, opacity: 0 }}
-                className="cyber-card p-6 w-full max-w-sm border border-amber-500/30 shadow-2xl shadow-amber-500/10">
-                <h3 className="text-lg font-black text-slate-100 mb-1 cursor-default">🤝 Özel Teklif Ver</h3>
-                <p className="text-[10px] text-slate-400 mb-6 cursor-default">
+                className="cyber-card p-6 w-full max-w-sm border border-amber-500/30 shadow-2xl">
+                <h3 className="text-lg font-black text-slate-100 mb-1">🤝 Özel Teklif Ver</h3>
+                <p className="text-[10px] text-slate-400 mb-6">
                   Tarihleri ve bütçenizi girin. Satıcı onaylarsa chat üzerinden doğrudan ödeme yapabileceksiniz.
                 </p>
-
                 <form onSubmit={handleSendOffer} className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -566,7 +632,7 @@ const ItemDetail = () => {
                         min={new Date().toISOString().split("T")[0]}
                         value={offerDates.start_date}
                         onChange={(e) => setOfferDates({ ...offerDates, start_date: e.target.value, end_date: "" })}
-                        className="cyber-input text-xs cursor-pointer hover:border-amber-500/50 transition-colors focus:border-amber-500"
+                        className="cyber-input text-xs focus:border-amber-500"
                       />
                     </div>
                     <div className="space-y-1">
@@ -578,15 +644,12 @@ const ItemDetail = () => {
                         min={offerDates.start_date}
                         value={offerDates.end_date}
                         onChange={(e) => setOfferDates({ ...offerDates, end_date: e.target.value })}
-                        className="cyber-input text-xs cursor-pointer disabled:opacity-40 hover:border-amber-500/50 transition-colors focus:border-amber-500"
+                        className="cyber-input text-xs focus:border-amber-500"
                       />
                     </div>
                   </div>
-
                   <div className="space-y-1">
-                    <label className="text-[10px] uppercase font-black text-slate-400 font-mono block cursor-default">
-                      Teklif Edilen Toplam Tutar (₺)
-                    </label>
+                    <label className="text-[10px] uppercase font-black text-slate-400 font-mono">Teklif Edilen Tutar (₺)</label>
                     <input
                       type="number"
                       required
@@ -594,21 +657,20 @@ const ItemDetail = () => {
                       placeholder="Örn: 500"
                       value={offerPrice}
                       onChange={(e) => setOfferPrice(e.target.value)}
-                      className="cyber-input w-full text-base font-bold hover:border-amber-500/50 transition-colors focus:border-amber-500"
+                      className="cyber-input w-full text-base font-bold focus:border-amber-500"
                     />
                   </div>
-
                   <div className="flex gap-3 pt-2">
                     <button
                       type="button"
                       onClick={() => setIsOfferModalOpen(false)}
-                      className="btn-slate flex-1 cursor-pointer hover:bg-slate-700 active:scale-95 transition-all">
+                      className="btn-slate flex-1 hover:bg-slate-700 active:scale-95 transition-all">
                       İptal
                     </button>
                     <button
                       type="submit"
                       disabled={isSubmittingOffer}
-                      className="btn-gradient flex-1 !bg-amber-500 !border-amber-400 hover:scale-105 active:scale-95 transition-transform disabled:opacity-50 cursor-pointer shadow-lg shadow-amber-500/20">
+                      className="btn-gradient flex-1 !bg-amber-500 !border-amber-400 hover:scale-105 active:scale-95 transition-transform disabled:opacity-50">
                       {isSubmittingOffer ? "Gönderiliyor..." : "Teklifi Gönder"}
                     </button>
                   </div>
@@ -618,7 +680,7 @@ const ItemDetail = () => {
           )}
         </AnimatePresence>
 
-        {/* 🎯 DÜZELTİLDİ: LIGHTBOX YENİ (SAĞA SOLA KAYDIRMALI) */}
+        {/* LIGHTBOX (Aynı kaldı) */}
         <AnimatePresence>
           {isLightboxOpen && (
             <motion.div
@@ -627,35 +689,28 @@ const ItemDetail = () => {
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-[110] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
               onClick={() => setIsLightboxOpen(false)}>
-              {/* Kapat Butonu */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsLightboxOpen(false);
                 }}
-                className="absolute top-6 right-6 btn-slate !font-mono tracking-widest cursor-pointer hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 active:scale-90 transition-all z-20">
+                className="absolute top-6 right-6 btn-slate !font-mono tracking-widest z-20">
                 KAPAT [ESC]
               </button>
-
-              {/* Sol Ok */}
               {item.images?.length > 1 && (
                 <button
                   onClick={prevImage}
-                  className="absolute left-4 sm:left-12 z-20 bg-slate-800/50 text-white p-4 sm:p-5 rounded-full hover:bg-blue-500/50 transition-colors cursor-pointer active:scale-90 border border-slate-600/50">
+                  className="absolute left-4 sm:left-12 z-20 bg-slate-800/50 text-white p-4 sm:p-5 rounded-full hover:bg-blue-500/50 border border-slate-600/50">
                   <span className="text-xl">◀</span>
                 </button>
               )}
-
-              {/* Sağ Ok */}
               {item.images?.length > 1 && (
                 <button
                   onClick={nextImage}
-                  className="absolute right-4 sm:right-12 z-20 bg-slate-800/50 text-white p-4 sm:p-5 rounded-full hover:bg-blue-500/50 transition-colors cursor-pointer active:scale-90 border border-slate-600/50">
+                  className="absolute right-4 sm:right-12 z-20 bg-slate-800/50 text-white p-4 sm:p-5 rounded-full hover:bg-blue-500/50 border border-slate-600/50">
                   <span className="text-xl">▶</span>
                 </button>
               )}
-
-              {/* Ortadaki Resim */}
               <motion.img
                 key={currentImgIndex}
                 initial={{ opacity: 0.5, scale: 0.95 }}
@@ -667,10 +722,8 @@ const ItemDetail = () => {
                 className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl border border-slate-800 cursor-default relative z-10"
                 onClick={(e) => e.stopPropagation()}
               />
-
-              {/* Resim İndikatörü */}
               {item.images?.length > 1 && (
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-700/50 text-slate-300 font-mono text-xs z-20 cursor-default">
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-700/50 text-slate-300 font-mono text-xs z-20">
                   {currentImgIndex + 1} / {item.images.length}
                 </div>
               )}

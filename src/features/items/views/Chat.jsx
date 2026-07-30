@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, useSearchParams, Link } from "react-router-dom"; // 🎯 EKLENDİ: Link importu eklendi
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { itemApi } from "../services/itemApi";
 import { toast, cyberConfirm } from "../../../utils/alerts";
@@ -59,16 +59,14 @@ const Chat = () => {
   const [newMessage, setNewMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
 
-  // 🎯 YENİ: Sadece sohbet kutusunu kaydırmak için referans
   const chatContainerRef = useRef(null);
 
-  // 🎯 YENİ: Sayfa zıplamasını engelleyen akıllı kaydırma fonksiyonu
   const scrollToBottom = (smooth = true) => {
     setTimeout(() => {
       if (chatContainerRef.current) {
         chatContainerRef.current.scrollTo({
           top: chatContainerRef.current.scrollHeight,
-          behavior: smooth ? "smooth" : "auto", // İlk açılışta anında (auto), yeni mesajda yumuşak (smooth)
+          behavior: smooth ? "smooth" : "auto",
         });
       }
     }, 100);
@@ -173,7 +171,7 @@ const Chat = () => {
             if (fetchedMessages.length > currentMsgCount) {
               const isFirstLoad = currentMsgCount === 0;
               currentMsgCount = fetchedMessages.length;
-              scrollToBottom(!isFirstLoad); // İlk açılışta anında (sıçrama yapmaz), yeni mesajda yumuşak kayar
+              scrollToBottom(!isFirstLoad);
             }
           })
           .catch((err) => console.error("Mesajlar güncellenemedi:", err));
@@ -240,7 +238,7 @@ const Chat = () => {
     setMapPosition([lat, lon]);
     setModalMapCenter([lat, lon]);
     setLocationAddress(result.name || result.display_name.split(",")[0]);
-    setSearchResults([]);
+    searchResults([]);
   };
 
   const handleSendLocation = async () => {
@@ -491,7 +489,6 @@ const Chat = () => {
               {/* SOHBET ÜST BİLGİ ALANI */}
               <div className="p-4 border-b border-[#475569]/40 flex items-center justify-between bg-[#0f172a]/40 backdrop-blur-md">
                 <div className="flex items-center gap-4">
-                  {/* 🎯 DEĞİŞTİRİLDİ: Resim artık Link (Yeni sekmede açılabilir) */}
                   {activeChat.item_image && (
                     <Link to={`/listings/${activeChat.item_id || activeChat.item}`} className="shrink-0 block">
                       <img
@@ -503,7 +500,6 @@ const Chat = () => {
                   )}
                   <div>
                     <h3 className="text-sm font-black text-slate-100 tracking-tight flex items-center gap-2">
-                      {/* 🎯 DEĞİŞTİRİLDİ: Başlık artık Link (Yeni sekmede açılabilir) */}
                       <Link
                         to={`/listings/${activeChat.item_id || activeChat.item}`}
                         className="cursor-pointer hover:text-blue-400 transition-colors">
@@ -518,7 +514,6 @@ const Chat = () => {
                     <p className="text-[11px] text-slate-400 font-medium mt-1 flex items-center gap-1.5">
                       👤 Konuştuğun Kişi:
                       {!activeChat.isNew ? (
-                        /* 🎯 DEĞİŞTİRİLDİ: Kullanıcı adı artık Link (Yeni sekmede açılabilir) */
                         <Link
                           to={`/stores/${partner.id}`}
                           className="text-blue-400 hover:text-blue-300 font-bold hover:underline transition-all">
@@ -532,7 +527,6 @@ const Chat = () => {
                   </div>
                 </div>
 
-                {/* 🎯 DEĞİŞTİRİLDİ: İlana Git butonu artık Link (Yeni sekmede açılabilir) */}
                 <Link
                   to={`/listings/${activeChat.item_id || activeChat.item}`}
                   className="btn-slate text-[10px] !py-1.5 !px-3 hover:scale-105 active:scale-95 transition-transform hover:bg-slate-700 flex items-center justify-center">
@@ -554,8 +548,10 @@ const Chat = () => {
                 ) : (
                   messages.map((msg) => {
                     const isMe = String(msg.sender).toLowerCase() === currentUserId;
+                    // 🎯 DİKKAT: RentCircle Destek Yetkili Hesap Kontrolü
+                    const isSupport = msg.sender_username === "rentcircle_destek" || msg.sender_name === "RentCircle Destek";
 
-                    // 1️⃣ YENİ ŞIK TEKLİF KARTI (Kutu İçi Kutu Formatı)
+                    // 1️⃣ YENİ ŞIK TEKLİF KARTI
                     if (msg.is_offer) {
                       return (
                         <motion.div
@@ -589,7 +585,6 @@ const Chat = () => {
 
                             <p className="text-xs text-slate-300 italic mb-4">"{msg.content}"</p>
 
-                            {/* DURUMLARA GÖRE BUTON DİZİLİMİ */}
                             {msg.offer_status === "pending" ? (
                               isMe ? (
                                 <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20 cursor-default">
@@ -734,22 +729,44 @@ const Chat = () => {
                       );
                     }
 
-                    // 3️⃣ NORMAL MESAJ BALONLARI
+                    // 3️⃣ NORMAL MESAJ BALONLARI (RENTCIRCLE DESTEK TASARIMLI)
                     return (
-                      <motion.div
+                      <div
                         key={msg.id}
-                        initial={{ opacity: 0, scale: 0.95, y: 5 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        className={`flex flex-col max-w-[75%] ${isMe ? "self-end items-end" : "self-start items-start"}`}>
-                        <div
-                          className={`px-4 py-2.5 rounded-2xl text-sm font-medium leading-relaxed shadow-sm border relative group cursor-default hover:opacity-90 transition-opacity ${isMe ? "bg-gradient-to-tr from-blue-600 via-blue-600 to-indigo-600 text-white rounded-br-none border-blue-500/20" : "bg-[#334155]/80 text-slate-200 rounded-bl-none border-[#475569]/40 backdrop-blur-sm"}`}>
-                          {msg.content}
+                        className={`flex w-full my-2 ${isSupport ? "justify-start" : isMe ? "justify-end" : "justify-start"}`}>
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95, y: 5 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          className={`flex flex-col max-w-[85%] sm:max-w-[75%] ${isSupport ? "items-start" : isMe ? "items-end" : "items-start"}`}>
                           <div
-                            className={`text-[9px] mt-1.5 font-mono flex items-center gap-1.5 opacity-70 ${isMe ? "justify-end text-blue-100" : "justify-start text-slate-400"}`}>
-                            <span>{formatMessageTime(msg.created_at)}</span>
+                            className={`px-4 py-3 rounded-2xl text-sm font-medium leading-relaxed shadow-sm border relative group cursor-default transition-all ${
+                              isSupport
+                                ? "bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 border-amber-500/50 text-blue-50 shadow-amber-500/10 rounded-tl-none"
+                                : isMe
+                                  ? "bg-gradient-to-tr from-blue-600 via-blue-600 to-indigo-600 text-white rounded-br-none border-blue-500/20"
+                                  : "bg-[#334155]/80 text-slate-200 rounded-bl-none border-[#475569]/40 backdrop-blur-sm"
+                            }`}>
+                            {/* 🎯 EĞER RENTCIRCLE DESTEK İSE RESMİ ROZET GÖSTER */}
+                            {isSupport && (
+                              <div className="flex items-center gap-2 mb-2 pb-2 border-b border-amber-500/30">
+                                <div className="w-5 h-5 rounded-full bg-amber-500/20 border border-amber-500 text-amber-400 flex items-center justify-center text-[10px] font-black shadow-inner">
+                                  🛡️
+                                </div>
+                                <span className="text-xs font-black tracking-widest text-amber-400 uppercase font-mono">
+                                  RentCircle Destek
+                                </span>
+                              </div>
+                            )}
+
+                            <p className="whitespace-pre-wrap">{msg.content}</p>
+
+                            <div
+                              className={`text-[9px] mt-2 font-mono flex items-center gap-1.5 opacity-70 ${isSupport ? "justify-end text-amber-400/70" : isMe ? "justify-end text-blue-100" : "justify-start text-slate-400"}`}>
+                              <span>{formatMessageTime(msg.created_at)}</span>
+                            </div>
                           </div>
-                        </div>
-                      </motion.div>
+                        </motion.div>
+                      </div>
                     );
                   })
                 )}
@@ -847,8 +864,6 @@ const Chat = () => {
                       onChange={(e) => {
                         const val = e.target.value;
                         setOfferDates({ ...offerDates, end_date: val });
-
-                        // Sadece bitiş tarihi yeni seçildiğinde otomatik fiyat çıkar
                         if (offerDates.start_date && val && activeChat?.item_price) {
                           const start = new Date(offerDates.start_date);
                           const end = new Date(val);

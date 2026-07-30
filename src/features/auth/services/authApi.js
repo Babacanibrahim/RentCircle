@@ -9,9 +9,7 @@ export const authApi = {
         const response = await axiosInstance.post('auth/login/', credentials);
         return response.data;
     },
-    // YENİ EKLENEN GERÇEK LOGOUT UCUMUZ:
     logout: async (refreshToken) => {
-        // Backend'deki header koruması (Bearer) için token gönderimini ayarla
         const accessToken = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
         const response = await axiosInstance.post('auth/logout/', 
             { refresh_token: refreshToken },
@@ -20,14 +18,15 @@ export const authApi = {
         return response.data;
     },
 
-    getProfile: async () => {
-        const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+    // 🎯 DÜZELTME BURADA: Eğer customToken gelirse (Login olurken), onu kullan. Yoksa localStorage'dan al.
+    getProfile: async (customToken = null) => {
+        const token = customToken || localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
         const response = await axiosInstance.get('auth/me/', { headers: { Authorization: `Bearer ${token}` } });
         return response.data;
     },
+    
     updateProfile: async (profileData) => {
         const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-        // Güncelleme için aynı 'auth/me/' adresine PATCH isteği atıyoruz
         const response = await axiosInstance.patch('auth/me/', profileData, { headers: { Authorization: `Bearer ${token}` } });
         return response.data;
     },
@@ -49,7 +48,6 @@ export const authApi = {
         const response = await axiosInstance.post('auth/reset-password/', data);
         return response.data;
     },
-   
 };
 
 export const walletApi = {
@@ -66,7 +64,6 @@ export const walletApi = {
         const response = await axiosInstance.post('auth/wallet/deposit/initiate/', { amount }, { 
             headers: { Authorization: `Bearer ${token}` } 
         });
-        // İyzico'dan dönen veri string formatındaysa JSON'a çeviriyoruz
         const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data;
         return data;
     },

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { itemApi } from "../services/itemApi";
 import ItemCard from "../components/ItemCard";
+import { toast } from "../../../utils/alerts";
 
 const DefaultAvatar = () => (
   <svg className="w-8 h-8 text-slate-300" fill="currentColor" viewBox="0 0 24 24">
@@ -17,6 +18,11 @@ const StoreDetail = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("active");
 
+  // 🚩 YENİ: Şikayet (Report) State'leri
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportForm, setReportForm] = useState({ reason: "", description: "", proof_image: null });
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+
   useEffect(() => {
     const fetchStore = async () => {
       try {
@@ -30,6 +36,40 @@ const StoreDetail = () => {
     };
     fetchStore();
   }, [id]);
+
+  // 🚩 YENİ: Şikayet Gönderme İşlemi
+  const handleReportSubmit = async (e) => {
+    e.preventDefault();
+    if (!reportForm.reason) return toast.fire({ icon: "warning", title: "Lütfen bir şikayet sebebi seçin." });
+
+    setIsSubmittingReport(true);
+    try {
+      const formData = new FormData();
+      formData.append("target_type", "user");
+
+      // 🎯 DÜZELTME BURADA: Backend "user_id" beklediği için anahtar adını "user_id" yapıyoruz.
+      // (Eğer sayfa parametresi store_id ise, değer kısmına store_id veya store.id yazmalısın)
+      formData.append("user_id", store.id); // Veya değişkenin adı neyse (örneğin: id, store_id)
+
+      formData.append("reason", reportForm.reason);
+      formData.append("description", reportForm.description);
+      if (reportForm.proof_image) {
+        formData.append("proof_image", reportForm.proof_image);
+      }
+
+      await itemApi.submitReport(formData);
+      toast.fire({ icon: "success", title: "Şikayetiniz ve kanıtınız yönetime iletildi." });
+      setIsReportModalOpen(false);
+      setReportForm({ reason: "", description: "", proof_image: null });
+    } catch (err) {
+      // 🎯 GERÇEK HATAYI EKRANA YAZDIRALIM Kİ KÖR KALMAYALIM:
+      const errorMsg = err.response?.data?.error || "Şikayet gönderilirken bir hata oluştu.";
+      toast.fire({ icon: "error", title: errorMsg });
+      console.error("Şikayet Hatası:", err.response?.data);
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
 
   if (loading)
     return (
@@ -47,12 +87,23 @@ const StoreDetail = () => {
     <div className="w-full relative p-6 lg:p-12 selection:bg-blue-500/30">
       <div className="max-w-6xl mx-auto space-y-8 relative z-10">
         {/* HERO KART */}
-        <div className="cyber-card p-8 relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6 hover:border-slate-600/50 transition-colors">
+        <div className="cyber-card p-8 relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6 hover:border-slate-600/50 transition-colors group">
           <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 blur-3xl rounded-full pointer-events-none" />
 
-          <div className="flex items-center gap-5 flex-col md:flex-row text-center md:text-left z-10">
+          {/* 🚩 Kullanıcıyı Şikayet Et Butonu (Sadece Hover durumunda görünür / Mobilde her zaman görünür) */}
+          <button
+            onClick={() => {
+              const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+              if (!token) return toast.fire({ icon: "info", title: "Kullanıcıyı şikayet etmek için giriş yapmalısınız." });
+              setIsReportModalOpen(true);
+            }}
+            className="absolute top-4 right-4 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 px-3 py-1.5 rounded-lg flex items-center gap-2 text-[10px] font-bold z-20">
+            🚩 ŞİKAYET ET
+          </button>
+
+          <div className="flex items-center gap-5 flex-col md:flex-row text-center md:text-left z-10 w-full mt-4 md:mt-0">
             {/* AVATAR KISMI */}
-            <div className="w-20 h-20 rounded-2xl bg-slate-800 flex items-center justify-center shadow-xl border border-slate-700/50 overflow-hidden font-black text-2xl text-slate-300 uppercase cursor-default">
+            <div className="w-20 h-20 rounded-2xl bg-slate-800 flex items-center justify-center shadow-xl border border-slate-700/50 overflow-hidden font-black text-2xl text-slate-300 uppercase cursor-default shrink-0">
               {store.profile_image ? (
                 <img
                   src={store.profile_image}
@@ -70,13 +121,10 @@ const StoreDetail = () => {
               <span className="text-[10px] text-emerald-400 font-bold tracking-widest uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
                 ✔️ KAYITLI KULLANICI
               </span>
-
               <h1 className="text-2xl font-black tracking-tight text-slate-100">
                 {store.show_name ? `${store.first_name} ${store.last_name}` : `@${store.username}`}
               </h1>
-
               {store.show_name && <h3 className="text-sm font-medium text-slate-400">@{store.username}</h3>}
-
               <div className="flex items-center justify-center md:justify-start gap-1.5 text-xs text-amber-400 font-semibold bg-slate-900/50 px-3 py-1 rounded-lg w-fit mx-auto md:mx-0 mt-2 hover:bg-slate-900/80 transition-colors">
                 ⭐ {store.rating > 0 ? store.rating : "Yeni"}
                 <span className="text-slate-400 font-normal">({store.review_count || storeReviews.length} Değerlendirme)</span>
@@ -85,6 +133,7 @@ const StoreDetail = () => {
           </div>
         </div>
 
+        {/* İlan Sekmeleri */}
         <div className="space-y-6">
           <div className="flex gap-2 border-b border-slate-700/50 pb-px">
             <button
@@ -140,32 +189,26 @@ const StoreDetail = () => {
           <h2 className="text-sm font-bold tracking-widest text-slate-300 uppercase font-mono cursor-default">
             💬 Kullanıcı Değerlendirmeleri
           </h2>
-
           {storeReviews.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {storeReviews.map((review) => {
                 const reviewerName = review.reviewer_show_name
                   ? `${review.reviewer_first_name} ${review.reviewer_last_name?.[0]}.`
                   : `@${review.reviewer_username}`;
-
-                const reviewerInitial = review.reviewer_show_name ? review.reviewer_first_name?.[0] : review.reviewer_username?.[0];
-
                 return (
                   <div key={review.id} className="cyber-card p-5 space-y-3 !bg-slate-800/20 hover:!bg-slate-800/40 transition-colors">
                     <div className="flex items-center justify-between cursor-default">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-lg bg-slate-700 flex items-center justify-center text-[11px] font-bold text-slate-200 uppercase shadow-inner border border-slate-600/50">
-                          {reviewerInitial || "K"}
+                          {reviewerName[0]}
                         </div>
-                        <span className="text-xs font-bold text-slate-200">{reviewerName || "Kullanıcı"}</span>
+                        <span className="text-xs font-bold text-slate-200">{reviewerName}</span>
                       </div>
                       <span className="text-[10px] tracking-widest">{"⭐".repeat(review.rating)}</span>
                     </div>
-
                     <p className="text-xs text-slate-300 leading-relaxed italic pl-9 cursor-default">
                       "{review.comment || "Sadece puanlama yapıldı."}"
                     </p>
-
                     <div className="mt-3 pl-9">
                       <div
                         onClick={() => navigate(`/listings/${review.item}`)}
@@ -177,7 +220,7 @@ const StoreDetail = () => {
                         />
                         <div className="flex flex-col pr-2">
                           <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Kiralanan Ürün</span>
-                          <span className="text-[10px] text-blue-400 font-semibold truncate max-w-[150px] group-hover:text-blue-300">
+                          <span className="text-[10px] text-blue-400 font-semibold truncate max-w-[150px]">
                             {review.item_title || "Ürün İlanı"}
                           </span>
                         </div>
@@ -194,6 +237,79 @@ const StoreDetail = () => {
           )}
         </div>
       </div>
+
+      {/* 🚩 KULLANICI ŞİKAYET MODALI */}
+      <AnimatePresence>
+        {isReportModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="cyber-card p-6 w-full max-w-sm border border-rose-500/30 shadow-2xl shadow-rose-500/10">
+              <h3 className="text-lg font-black text-rose-400 mb-1">🚩 Kullanıcıyı Şikayet Et</h3>
+              <p className="text-[10px] text-slate-400 mb-6">
+                Bu kullanıcının kuralları ihlal ettiğini veya şüpheli davrandığını düşünüyorsanız bize bildirin.
+              </p>
+
+              <form onSubmit={handleReportSubmit} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Şikayet Sebebi</label>
+                  <select
+                    required
+                    value={reportForm.reason}
+                    onChange={(e) => setReportForm({ ...reportForm, reason: e.target.value })}
+                    className="cyber-input w-full text-xs cursor-pointer focus:border-rose-500">
+                    <option value="" disabled>
+                      Sebep Seçin...
+                    </option>
+                    <option value="Dolandırıcılık Şüphesi">Dolandırıcılık Şüphesi</option>
+                    <option value="Sahte veya Çalıntı Hesap">Sahte veya Çalıntı Hesap</option>
+                    <option value="Hakaret veya Taciz">Küfür, Hakaret veya Taciz</option>
+                    <option value="Ulaşılamayan Satıcı">Kiralama Sonrası Ulaşılamıyor</option>
+                    <option value="Diğer">Diğer</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Detaylı Açıklama (Opsiyonel)</label>
+                  <textarea
+                    rows="3"
+                    placeholder="Yaşadığınız sorunu kısaca anlatın..."
+                    value={reportForm.description}
+                    onChange={(e) => setReportForm({ ...reportForm, description: e.target.value })}
+                    className="cyber-input w-full text-xs focus:border-rose-500 resize-none"></textarea>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-slate-400">Kanıt Görseli Ekleyin (İsteğe Bağlı, Max 1)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setReportForm({ ...reportForm, proof_image: e.target.files[0] })}
+                    className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-500/10 file:text-blue-400 hover:file:bg-blue-500/20 cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsReportModalOpen(false)}
+                    className="btn-slate flex-1 hover:bg-slate-700 transition-all">
+                    İptal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReport}
+                    className="btn-gradient flex-1 !bg-rose-600 !border-rose-500 hover:scale-105 active:scale-95 transition-transform disabled:opacity-50">
+                    {isSubmittingReport ? "İletiliyor..." : "Gönder"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

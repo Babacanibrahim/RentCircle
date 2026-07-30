@@ -3,51 +3,111 @@ import { itemApi } from "../../items/services/itemApi";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, cyberConfirm } from "../../../utils/alerts";
 import NotFound from "../../components/NotFound";
+import { useNavigate } from "react-router-dom";
 
 const AdminDashboard = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [isUnauthorized, setIsUnauthorized] = useState(false);
   const [activeTab, setActiveTab] = useState("stats");
 
+  // VERİ STATE'LERİ
   const [stats, setStats] = useState(null);
   const [disputes, setDisputes] = useState([]);
   const [users, setUsers] = useState([]);
   const [items, setItems] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [withdrawals, setWithdrawals] = useState([]); // 💸 FİNANS İÇİN YENİ STATE
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [tickets, setTickets] = useState([]);
+
+  // FİLTRE VE ARAMA
   const [searchQuery, setSearchQuery] = useState("");
+  const [bannedFilter, setBannedFilter] = useState("all");
 
-  // ================= UNDO (GERİ AL) SİSTEMİ =================
-  const [pendingAction, setPendingAction] = useState(null); // { type: 'user'|'item', obj: {...}, timeoutId }
-
-  // Modallar
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [userModalTab, setUserModalTab] = useState("info");
-  const [selectedUserLogs, setSelectedUserLogs] = useState([]);
-  const [logFilter, setLogFilter] = useState("all");
-
-  const [selectedItem, setSelectedItem] = useState(null);
+  // MODAL VE İŞLEM STATE'LERİ
+  const [pendingAction, setPendingAction] = useState(null);
   const [selectedDispute, setSelectedDispute] = useState(null);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [categoryForm, setCategoryForm] = useState({ name: "" });
 
-  const [userForm, setUserForm] = useState({});
-  const [itemForm, setItemForm] = useState({});
+  const [supportModal, setSupportModal] = useState({ isOpen: false, type: null, data: null });
+  const [supportReplyText, setSupportReplyText] = useState("");
+  const [isReplying, setIsReplying] = useState(false);
+
+  const openSupportModal = (type, data) => {
+    setSupportModal({ isOpen: true, type, data });
+    setSupportReplyText("");
+  };
+
+  const handleSendSupportReply = async (e) => {
+    e.preventDefault();
+    if (!supportReplyText.trim()) return toast.fire({ icon: "warning", title: "Lütfen bir mesaj yazın." });
+
+    setIsReplying(true);
+    try {
+      const targetUsername = supportModal.type === "ticket" ? supportModal.data.user_username : supportModal.data.reporter_username;
+      const targetUser = users.find((u) => u.username === targetUsername);
+
+      if (!targetUser) throw new Error("Kullanıcı sistemde bulunamadı.");
+
+      await itemApi.replyToSupport({
+        user_id: targetUser.id,
+        message: supportReplyText,
+        ticket_id: supportModal.type === "ticket" ? supportModal.data.id : null,
+      });
+
+      toast.fire({ icon: "success", title: "Yanıtınız 'RentCircle Destek' hesabı üzerinden kullanıcıya iletildi." });
+      setSupportModal({ isOpen: false, type: null, data: null });
+      fetchAdminData();
+    } catch (error) {
+      toast.fire({ icon: "error", title: "Mesaj gönderilemedi." });
+    } finally {
+      setIsReplying(false);
+    }
+  };
 
   const fetchAdminData = async () => {
     try {
-      const [statsData, disputesData, usersData, itemsData, logsData, withdrawalsData] = await Promise.all([
+      const [statsData, disputesData, usersData, itemsData, logsData, withdrawalsData, categoriesData, reportsData] = await Promise.all([
         itemApi.getAdminStats(),
         itemApi.getDisputedBookings(),
         itemApi.getAdminUsers(searchQuery),
         itemApi.getAdminItems(searchQuery),
         itemApi.getSystemLogs(),
-        itemApi.getAdminWithdrawals(), // 💸 Finans verisi çekildi
+        itemApi.getAdminWithdrawals(),
+        itemApi.getCategories(),
+        itemApi.getAdminReports(),
       ]);
+
       setStats(statsData);
       setDisputes(disputesData);
       setUsers(usersData);
       setItems(itemsData);
       setLogs(logsData);
       setWithdrawals(withdrawalsData);
+      setCategories(categoriesData);
+      setReports(reportsData);
+
+      try {
+        setBookings(await itemApi.getAdminBookings());
+      } catch (e) {
+        setBookings([]);
+      }
+      try {
+        setReviews(await itemApi.getAdminReviews());
+      } catch (e) {
+        setReviews([]);
+      }
+      try {
+        setTickets(await itemApi.getAdminTickets());
+      } catch (e) {
+        setTickets([]);
+      }
     } catch (error) {
       if (error.response?.status === 403 || error.response?.status === 401) setIsUnauthorized(true);
       else toast.fire({ icon: "error", title: "Veriler çekilemedi." });
@@ -60,11 +120,13 @@ const AdminDashboard = () => {
     fetchAdminData();
   }, [searchQuery]);
 
-  // ================= UNDO İŞLEMLERİ (GERİ ALMA) =================
   const executeDeleteAPI = async (type, id) => {
     try {
       if (type === "user") await itemApi.adminDeleteUser(id);
       if (type === "item") await itemApi.adminDeleteItem(id);
+      if (type === "category") await itemApi.deleteCategory(id);
+      if (type === "booking") await itemApi.adminDeleteBooking(id);
+      if (type === "review") await itemApi.adminDeleteReview(id);
       toast.fire({ icon: "success", title: "Kalıcı olarak silindi." });
       fetchAdminData();
     } catch (e) {
@@ -75,19 +137,28 @@ const AdminDashboard = () => {
   };
 
   const requestDelete = async (type, obj) => {
+    const titleMap = {
+      user: "Kullanıcıyı Sil",
+      item: "İlanı Sil",
+      category: "Kategoriyi Sil",
+      booking: "Rezervasyonu Sil",
+      review: "Yorumu Sil",
+    };
     const result = await cyberConfirm.fire({
-      title: type === "user" ? "Kullanıcıyı Sil" : "İlanı Sil",
-      text: "Silinen veri geri getirilemez. Ancak 5 saniye içinde geri alma (Undo) şansınız olacak.",
+      title: titleMap[type],
+      text: "Silinen veri geri getirilemez. 5 saniye içinde iptal edebilirsiniz.",
       icon: "warning",
       confirmButtonText: "Sil",
       confirmButtonColor: "#e11d48",
     });
 
     if (result.isConfirmed) {
-      setSelectedUser(null);
-      setSelectedItem(null);
-      if (type === "user") setUsers((prev) => prev.filter((u) => u.id !== obj.id));
-      if (type === "item") setItems((prev) => prev.filter((i) => i.id !== obj.id));
+      setIsCategoryModalOpen(false);
+      if (type === "user") setUsers((p) => p.filter((u) => u.id !== obj.id));
+      if (type === "item") setItems((p) => p.filter((i) => i.id !== obj.id));
+      if (type === "category") setCategories((p) => p.filter((c) => c.id !== obj.id));
+      if (type === "booking") setBookings((p) => p.filter((b) => b.id !== obj.id));
+      if (type === "review") setReviews((p) => p.filter((r) => r.id !== obj.id));
 
       const timeoutId = setTimeout(() => {
         executeDeleteAPI(type, obj.id);
@@ -99,554 +170,883 @@ const AdminDashboard = () => {
   const undoDelete = () => {
     if (!pendingAction) return;
     clearTimeout(pendingAction.timeoutId);
-    if (pendingAction.type === "user") setUsers((prev) => [pendingAction.obj, ...prev]);
-    if (pendingAction.type === "item") setItems((prev) => [pendingAction.obj, ...prev]);
+    if (pendingAction.type === "user") setUsers((p) => [pendingAction.obj, ...p]);
+    if (pendingAction.type === "item") setItems((p) => [pendingAction.obj, ...p]);
+    if (pendingAction.type === "category") setCategories((p) => [pendingAction.obj, ...p]);
+    if (pendingAction.type === "booking") setBookings((p) => [pendingAction.obj, ...p]);
+    if (pendingAction.type === "review") setReviews((p) => [pendingAction.obj, ...p]);
     setPendingAction(null);
     toast.fire({ icon: "info", title: "Silme işlemi geri alındı." });
   };
 
-  // ================= KULLANICI İŞLEMLERİ =================
-  const openUserGodMode = async (user) => {
-    setSelectedUser(user);
-    setUserModalTab("info");
-    setLogFilter("all");
-    setUserForm({ wallet_balance: user.wallet_balance, trust_score: user.trust_score, is_staff: user.is_staff });
-    try {
-      const uLogs = await itemApi.getAdminUserLogs(user.id);
-      setSelectedUserLogs(uLogs);
-    } catch (error) {}
+  const openCategoryModal = (cat = null) => {
+    setSelectedCategory(cat);
+    setCategoryForm(cat ? { name: cat.name } : { name: "" });
+    setIsCategoryModalOpen(true);
   };
 
-  const handleUpdateUser = async () => {
+  const handleSaveCategory = async () => {
+    if (!categoryForm.name.trim()) return toast.fire({ icon: "warning", title: "Kategori adı boş olamaz." });
     try {
-      await itemApi.updateAdminUser({ user_id: selectedUser.id, ...userForm });
-      toast.fire({ icon: "success", title: "Güncellendi." });
-      setSelectedUser(null);
+      if (selectedCategory) {
+        await itemApi.updateCategory(selectedCategory.id, categoryForm);
+        toast.fire({ icon: "success", title: "Kategori güncellendi." });
+      } else {
+        await itemApi.createCategory(categoryForm);
+        toast.fire({ icon: "success", title: "Yeni kategori eklendi." });
+      }
+      setIsCategoryModalOpen(false);
       fetchAdminData();
-    } catch (error) {
-      toast.fire({ icon: "error", title: "Başarısız." });
+    } catch (e) {
+      toast.fire({ icon: "error", title: "İşlem başarısız." });
     }
   };
 
-  // ================= İLAN İŞLEMLERİ =================
-  const openItemGodMode = (item) => {
-    setSelectedItem(item);
-    setItemForm({
-      title: item.title,
-      description: item.description,
-      price_per_day: item.price_per_day,
-      city: item.city,
-      is_available: item.is_available,
-      is_banned: item.is_banned,
-    });
-  };
-
-  const handleUpdateItem = async () => {
-    try {
-      await itemApi.adminUpdateItem({ item_id: selectedItem.id, ...itemForm });
-      toast.fire({ icon: "success", title: "İlan güncellendi." });
-      setSelectedItem(null);
-      fetchAdminData();
-    } catch (error) {
-      toast.fire({ icon: "error", title: "Başarısız." });
-    }
-  };
-
-  // ================= FİNANS / PARA ÇEKME İŞLEMLERİ =================
   const handleWithdrawalAction = async (id, action) => {
     let reason = "";
     if (action === "reject") {
       const { value, isConfirmed } = await cyberConfirm.fire({
         title: "Talebi Reddet",
         input: "text",
-        inputPlaceholder: "Reddetme sebebi (Örn: Hatalı IBAN)...",
+        inputPlaceholder: "Sebep girin...",
         showCancelButton: true,
         confirmButtonText: "Reddet ve İade Et",
-        confirmButtonColor: "#e11d48",
       });
       if (!isConfirmed) return;
-      if (!value) return toast.fire({ icon: "warning", title: "Lütfen bir sebep girin." });
+      if (!value) return toast.fire({ icon: "warning", title: "Sebep giriniz." });
       reason = value;
     } else {
       const { isConfirmed } = await cyberConfirm.fire({
         title: "EFT Onayı",
-        text: "Kullanıcıya parayı gönderdiğinizi onaylıyor musunuz?",
+        text: "Parayı gönderdiğinizi onaylıyor musunuz?",
         confirmButtonText: "Evet, Gönderdim",
       });
       if (!isConfirmed) return;
     }
-
     try {
       await itemApi.handleAdminWithdrawal({ request_id: id, action, reason });
       toast.fire({ icon: "success", title: "İşlem tamamlandı." });
       fetchAdminData();
     } catch (e) {
-      toast.fire({ icon: "error", title: "İşlem başarısız oldu." });
+      toast.fire({ icon: "error", title: "Başarısız oldu." });
     }
   };
 
-  // ================= ÇÖZÜM MERKEZİ =================
   const handleResolveDispute = async (bookingId, winner) => {
-    const result = await cyberConfirm.fire({
-      title: winner === "owner" ? "Satıcıyı Haklı Bul" : "Kiracıyı Haklı Bul",
+    const { value, isConfirmed } = await cyberConfirm.fire({
+      title: winner === "owner" ? "Satıcı Haklı" : "Kiracı Haklı",
       input: "textarea",
       inputPlaceholder: "Gerekçe giriniz...",
       showCancelButton: true,
-      confirmButtonText: "⚖️ Onayla",
+      confirmButtonText: "Onayla",
     });
-    if (result.isConfirmed) {
-      if (!result.value) return toast.fire({ icon: "warning", title: "Gerekçe zorunludur." });
+    if (isConfirmed && value) {
       try {
-        await itemApi.resolveDispute(bookingId, { winner, resolution_note: result.value });
-        toast.fire({ icon: "success", title: "Depozito aktarıldı." });
+        await itemApi.resolveDispute(bookingId, { winner, resolution_note: value });
+        toast.fire({ icon: "success", title: "Çözüldü." });
         setSelectedDispute(null);
         fetchAdminData();
-      } catch (error) {
-        toast.fire({ icon: "error", title: "Hata oluştu" });
+      } catch (e) {
+        toast.fire({ icon: "error", title: "Hata" });
       }
+    } else if (isConfirmed) toast.fire({ icon: "warning", title: "Gerekçe zorunludur." });
+  };
+
+  const handleLogout = async () => {
+    const result = await cyberConfirm.fire({
+      title: "Çıkış Yap",
+      text: "Sistemden çıkış yapmak istediğinize emin misiniz?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Evet, Çıkış Yap",
+      cancelButtonText: "İptal",
+    });
+
+    if (result.isConfirmed) {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      sessionStorage.removeItem("access_token");
+      sessionStorage.removeItem("refresh_token");
+      navigate("/login");
     }
   };
 
+  const getBannedUsers = () => {
+    return users.filter((u) => u.banned_until || u.is_active === false);
+  };
+
+  const getBannedItems = () => {
+    return items.filter((i) => i.is_banned);
+  };
+
   if (isUnauthorized) return <NotFound />;
-  if (loading) return <div className="pt-20 text-center text-slate-500 font-mono animate-pulse">SİSTEM BAŞLATILIYOR...</div>;
+  if (loading)
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center text-blue-500 font-bold animate-pulse">
+        SİSTEM BAŞLATILIYOR...
+      </div>
+    );
+
+  const TABS = [
+    { id: "stats", label: "Dashboard", icon: "📊" },
+    { id: "finances", label: "Finans Yönetimi", icon: "💳" },
+    { id: "tickets", label: "Destek Biletleri", icon: "🎫" },
+    { id: "reports", label: "Şikayetler", icon: "🚩" },
+    { id: "users", label: "Kullanıcılar", icon: "👥" },
+    { id: "items", label: "İlanlar", icon: "📦" },
+    { id: "bookings", label: "Kiralamalar", icon: "🤝" },
+    { id: "reviews", label: "Yorumlar", icon: "⭐" },
+    { id: "disputes", label: "Çözüm Merkezi", icon: "⚖️" },
+    { id: "banned", label: "Yasaklılar", icon: "🚫" },
+    { id: "categories", label: "Kategoriler", icon: "📂" },
+    { id: "logs", label: "Sistem Logları", icon: "📋" },
+  ];
 
   return (
-    <div className="w-full relative selection:bg-rose-500/30 min-h-screen bg-[#0a0f16] pb-32">
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
-        {/* ÜST MENÜ */}
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
-          <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-rose-600 tracking-tighter">
-            KOMUTA MERKEZİ
-          </h1>
-          <div className="flex gap-2 bg-slate-900 p-1.5 rounded-xl border border-slate-800 overflow-x-auto shadow-2xl">
-            {["stats", "finances", "users", "items", "disputes", "logs"].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 rounded-lg text-sm font-bold capitalize transition-colors flex items-center gap-2 ${activeTab === tab ? "bg-slate-800 text-rose-400" : "text-slate-500 hover:text-slate-300"}`}>
-                {tab === "stats"
-                  ? "📊 İstatistik"
-                  : tab === "finances"
-                    ? "💸 Finans Onay"
-                    : tab === "users"
-                      ? "👥 Kullanıcılar"
-                      : tab === "items"
-                        ? "📦 İlanlar"
-                        : tab === "disputes"
-                          ? "🚨 Kriz Merkezi"
-                          : "📋 Terminal"}
-                {tab === "finances" && withdrawals.filter((w) => w.status === "PENDING").length > 0 && (
-                  <span className="bg-emerald-500 text-slate-900 text-[10px] px-1.5 py-0.5 rounded-full animate-pulse">
-                    {withdrawals.filter((w) => w.status === "PENDING").length}
-                  </span>
-                )}
-                {tab === "disputes" && disputes.length > 0 && (
-                  <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{disputes.length}</span>
-                )}
-              </button>
-            ))}
+    <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col hidden md:flex shrink-0 shadow-sm z-20">
+        <div className="h-20 flex items-center px-6 border-b border-slate-100">
+          <div className="flex items-center gap-2 cursor-default select-none">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-md shadow-blue-500/30">
+              <span className="text-white text-lg font-black">R</span>
+            </div>
+            <span className="text-xl font-black tracking-tight text-slate-800">
+              Rent<span className="text-blue-600">Circle</span>
+            </span>
           </div>
         </div>
 
-        {/* ORTAK ARAMA ÇUBUĞU */}
-        {["users", "items"].includes(activeTab) && (
-          <div className="relative mb-6">
-            <span className="absolute inset-y-0 left-3 flex items-center text-slate-500">🔍</span>
+        <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 scrollbar-hide">
+          <div className="text-[10px] font-bold tracking-widest text-slate-400 uppercase mb-3 ml-2">Yönetim Menüsü</div>
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
+                activeTab === tab.id
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                  : "text-slate-500 hover:bg-slate-50 hover:text-blue-600"
+              }`}>
+              <span className="text-base opacity-90">{tab.icon}</span>
+              {tab.label}
+              {tab.id === "finances" && withdrawals.filter((w) => w.status === "PENDING").length > 0 && (
+                <span className="ml-auto bg-amber-400 text-white text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">
+                  {withdrawals.filter((w) => w.status === "PENDING").length}
+                </span>
+              )}
+              {tab.id === "reports" && reports.filter((r) => r.status === "pending").length > 0 && (
+                <span className="ml-auto bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">
+                  {reports.filter((r) => r.status === "pending").length}
+                </span>
+              )}
+              {tab.id === "tickets" && tickets.filter((t) => t.status === "open").length > 0 && (
+                <span className="ml-auto bg-indigo-500 text-white text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">
+                  {tickets.filter((t) => t.status === "open").length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-4 border-t border-slate-100 space-y-2 bg-slate-50/50">
+          <button
+            onClick={() => (window.location.href = "/dashboard")}
+            className="w-full flex items-center gap-3 px-4 py-3 bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-600 text-slate-600 rounded-xl text-sm font-semibold transition-all shadow-sm cursor-pointer active:scale-95">
+            <span>🌍</span> Vitrine Dön
+          </button>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 bg-rose-50 hover:bg-rose-100 border border-rose-100 hover:border-rose-200 text-rose-600 rounded-xl text-sm font-semibold transition-all shadow-sm cursor-pointer active:scale-95">
+            <span>🚪</span> Çıkış Yap
+          </button>
+        </div>
+      </aside>
+
+      <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
+        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-10">
+          <div className="hidden md:flex items-center bg-slate-100 rounded-full px-4 py-2.5 w-96 border border-transparent focus-within:border-blue-300 focus-within:bg-white transition-all shadow-inner">
+            <span className="text-slate-400 mr-2">🔍</span>
             <input
               type="text"
-              placeholder="Veritabanında ara..."
+              placeholder="Modellerde arama yap..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-xl pl-10 pr-4 py-3 focus:border-rose-500 outline-none"
+              className="bg-transparent border-none outline-none w-full text-sm text-slate-700 placeholder-slate-400"
             />
           </div>
-        )}
 
-        {/* 1. İSTATİSTİKLER */}
-        {activeTab === "stats" && stats && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+          <div className="flex items-center gap-4 ml-auto">
+            <div className="flex flex-col text-right hidden sm:flex">
+              <span className="text-sm font-bold text-slate-800">Sistem Yöneticisi</span>
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Yetkili Hesap</span>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border-2 border-white shadow-md">
+              <span className="text-white font-bold text-sm">A</span>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 scrollbar-thin scrollbar-thumb-slate-300">
+          <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500 rounded-3xl p-8 md:p-10 mb-8 shadow-xl shadow-blue-500/20 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
+            <h2 className="text-3xl md:text-4xl font-black text-white tracking-tight mb-2 relative z-10">Sisteme Hoş Geldiniz!</h2>
+            <p className="text-blue-100 text-sm md:text-base font-medium max-w-2xl relative z-10">
+              Tüm platform verilerini, CRUD işlemlerini ve kullanıcı hareketlerini bu panelden güvenle yönetebilirsiniz.
+            </p>
+          </div>
+
+          {activeTab === "stats" && stats && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl">
-                <div className="text-emerald-500 text-xs font-black font-mono mb-2">Kullanıcı Cüzdanları</div>
-                <div className="text-4xl font-black text-slate-100">₺{stats.finances.total_wallets}</div>
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+                <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                  💰
+                </div>
+                <div className="text-slate-500 text-sm font-semibold mb-1">Kullanıcı Cüzdanları</div>
+                <div className="text-3xl font-black text-slate-800">₺{stats.finances.total_wallets}</div>
               </div>
-              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl">
-                <div className="text-blue-500 text-xs font-black font-mono mb-2">Havuzdaki Kira Bedelleri</div>
-                <div className="text-4xl font-black text-slate-100">₺{stats.finances.pool_rent}</div>
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+                <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                  🔄
+                </div>
+                <div className="text-slate-500 text-sm font-semibold mb-1">Havuzdaki Kira Bedeli</div>
+                <div className="text-3xl font-black text-slate-800">₺{stats.finances.pool_rent}</div>
               </div>
-              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl">
-                <div className="text-amber-500 text-xs font-black font-mono mb-2">Havuzdaki Depozitolar</div>
-                <div className="text-4xl font-black text-slate-100">₺{stats.finances.pool_deposit}</div>
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+                <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center text-xl mb-4 group-hover:scale-110 transition-transform">
+                  🛡️
+                </div>
+                <div className="text-slate-500 text-sm font-semibold mb-1">Havuzdaki Depozitolar</div>
+                <div className="text-3xl font-black text-slate-800">₺{stats.finances.pool_deposit}</div>
               </div>
             </div>
-          </motion.div>
-        )}
+          )}
 
-        {/* 💸 2. FİNANS VE ÖDEME ONAYLARI */}
-        {activeTab === "finances" && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-slate-950 text-[10px] uppercase text-slate-500 font-black border-b border-slate-800">
-                  <tr>
-                    <th className="px-6 py-4">Tarih</th>
-                    <th className="px-6 py-4">Kullanıcı</th>
-                    <th className="px-6 py-4">IBAN</th>
-                    <th className="px-6 py-4">Tutar</th>
-                    <th className="px-6 py-4 text-center">Durum / İşlem</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50">
-                  {withdrawals.map((w) => (
-                    <tr key={w.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="px-6 py-4 font-mono text-xs text-slate-500">{w.created_at_formatted}</td>
-                      <td className="px-6 py-4">
-                        <div className="font-bold text-slate-200">
-                          {w.user_name} {w.user_surname}
-                        </div>
-                        <div className="text-[10px] text-slate-500">{w.user_email}</div>
-                      </td>
-                      <td className="px-6 py-4 font-mono text-indigo-300 text-xs tracking-wider">{w.iban}</td>
-                      <td className="px-6 py-4 font-black text-emerald-400 text-lg">₺{w.amount}</td>
-                      <td className="px-6 py-4 text-center">
-                        {w.status === "PENDING" ? (
-                          <div className="flex justify-center gap-2">
-                            <button
-                              onClick={() => handleWithdrawalAction(w.id, "approve")}
-                              className="bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-white border border-emerald-500/50 px-3 py-1.5 rounded-lg text-xs font-bold transition-all">
-                              Onayla
-                            </button>
-                            <button
-                              onClick={() => handleWithdrawalAction(w.id, "reject")}
-                              className="bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white border border-rose-500/50 px-3 py-1.5 rounded-lg text-xs font-bold transition-all">
-                              Reddet
-                            </button>
-                          </div>
-                        ) : w.status === "APPROVED" ? (
-                          <span className="text-[10px] font-black tracking-widest text-emerald-500 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
-                            ÖDENDİ
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-black tracking-widest text-rose-500 bg-rose-500/10 px-3 py-1.5 rounded-lg border border-rose-500/20">
-                            İPTAL EDİLDİ
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {withdrawals.length === 0 && (
+          {activeTab === "finances" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Bekleyen Finansal İşlemler</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-600">
+                  <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
                     <tr>
-                      <td colSpan="5" className="text-center py-10 text-slate-500 font-mono">
-                        Bekleyen finansal işlem bulunamadı.
-                      </td>
+                      <th className="px-6 py-4">Tarih</th>
+                      <th className="px-6 py-4">Kullanıcı</th>
+                      <th className="px-6 py-4">IBAN</th>
+                      <th className="px-6 py-4">Tutar</th>
+                      <th className="px-6 py-4 text-center">İşlem</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {withdrawals.map((w) => (
+                      <tr key={w.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4 font-mono text-xs text-slate-400">{w.created_at_formatted}</td>
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-slate-800">
+                            {w.user_name} {w.user_surname}
+                          </div>
+                          <div className="text-[11px] text-slate-500">{w.user_email}</div>
+                        </td>
+                        <td className="px-6 py-4 font-mono text-blue-600 text-xs">{w.iban}</td>
+                        <td className="px-6 py-4 font-black text-slate-800 text-lg">₺{w.amount}</td>
+                        <td className="px-6 py-4 text-center">
+                          {w.status === "PENDING" ? (
+                            <div className="flex justify-center gap-2">
+                              <button
+                                onClick={() => handleWithdrawalAction(w.id, "approve")}
+                                className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-500 hover:text-white transition-all shadow-sm active:scale-95 cursor-pointer">
+                                ONAYLA
+                              </button>
+                              <button
+                                onClick={() => handleWithdrawalAction(w.id, "reject")}
+                                className="bg-rose-50 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-rose-500 hover:text-white transition-all shadow-sm active:scale-95 cursor-pointer">
+                                REDDET
+                              </button>
+                            </div>
+                          ) : w.status === "APPROVED" ? (
+                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">ÖDENDİ</span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-3 py-1 rounded-full">İPTAL EDİLDİ</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </motion.div>
-        )}
+          )}
 
-        {/* 👥 3. KULLANICILAR */}
-        {activeTab === "users" && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-slate-950 text-[10px] uppercase text-slate-500 font-black border-b border-slate-800">
+          {activeTab === "tickets" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Kullanıcı Destek Talepleri (Tickets)</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-600">
+                  <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="px-6 py-4">Bilet No / Tarih</th>
+                      <th className="px-6 py-4">Kullanıcı</th>
+                      <th className="px-6 py-4">Konu</th>
+                      <th className="px-6 py-4 w-1/3">Mesaj</th>
+                      <th className="px-6 py-4 text-center">İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {tickets.map((t) => (
+                      <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-mono text-xs font-bold text-slate-700 mb-1">
+                            #{String(t.id).substring(0, 6).toUpperCase()}
+                          </div>
+                          <div className="text-[11px] text-slate-400">{t.created_at_formatted}</div>
+                        </td>
+                        <td className="px-6 py-4 font-bold text-indigo-600">@{t.user_username}</td>
+                        <td className="px-6 py-4 font-semibold text-slate-800">{t.topic_display}</td>
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-slate-700 text-sm">{t.subject}</div>
+                          <div className="text-xs text-slate-500 mt-1 truncate max-w-xs">{t.description}</div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            onClick={() => openSupportModal("ticket", t)}
+                            className="text-[10px] font-bold bg-indigo-50 text-indigo-600 px-4 py-2 rounded-lg transition-colors border border-indigo-200 hover:bg-indigo-600 hover:text-white">
+                            İncele & Yanıtla
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {tickets.length === 0 && (
+                      <tr>
+                        <td colSpan="5" className="text-center py-10 text-slate-400 font-medium text-sm">
+                          Bekleyen destek talebi bulunmuyor.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "reports" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Gelen Şikayet Raporları</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-600">
+                  <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="px-6 py-4">Tarih / Gönderen</th>
+                      <th className="px-6 py-4">Hedef</th>
+                      <th className="px-6 py-4 w-1/3">Sebep</th>
+                      <th className="px-6 py-4 text-center">Aksiyon</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {reports.map((rep) => (
+                      <tr key={rep.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="text-[11px] text-slate-400 mb-1">{rep.created_at_formatted}</div>
+                          <div className="font-bold text-slate-700">@{rep.reporter_username}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          {rep.target_type === "item" ? (
+                            <>
+                              <span className="bg-indigo-50 text-indigo-600 text-[10px] px-2 py-0.5 rounded font-bold mr-2">İLAN</span>{" "}
+                              <span className="font-semibold text-slate-700">{rep.reported_item_title}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="bg-fuchsia-50 text-fuchsia-600 text-[10px] px-2 py-0.5 rounded font-bold mr-2">
+                                KULLANICI
+                              </span>{" "}
+                              <span className="font-semibold text-slate-700">@{rep.reported_username}</span>
+                            </>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-rose-500 text-sm">{rep.reason}</div>
+                          {rep.description && <div className="text-xs text-slate-500 mt-1 italic">"{rep.description}"</div>}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {rep.status === "pending" ? (
+                            <div className="flex justify-center items-center">
+                              <button
+                                onClick={() =>
+                                  navigate(
+                                    rep.target_type === "item"
+                                      ? `/admin-dashboard/items/${rep.reported_item}`
+                                      : `/admin-dashboard/users/${rep.reported_user}`,
+                                  )
+                                }
+                                className="bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 shadow-sm">
+                                Profili İncele
+                              </button>
+                              <button
+                                onClick={() => openSupportModal("report", rep)}
+                                className="bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white border border-amber-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 shadow-sm ml-2">
+                                Mesaj At
+                              </button>
+                            </div>
+                          ) : rep.status === "resolved" ? (
+                            <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-3 py-1 rounded-full">İŞLEM YAPILDI</span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">REDDEDİLDİ</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {reports.length === 0 && (
+                      <tr>
+                        <td colSpan="4" className="text-center py-10 text-slate-400 font-medium text-sm">
+                          Bekleyen şikayet bulunmuyor.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "banned" && (
+            <div className="space-y-6">
+              <div className="flex gap-2">
+                {["all", "permanent", "temporary"].map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setBannedFilter(f)}
+                    className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                      bannedFilter === f
+                        ? "bg-rose-600 text-white shadow-md shadow-rose-500/20"
+                        : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50"
+                    }`}>
+                    {f === "all" ? "Tümü" : f === "permanent" ? "Süresiz Yasaklılar" : "Süreli Cezalılar"}
+                  </button>
+                ))}
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                  <h3 className="font-bold text-rose-600">Yasaklı Hesap ve İlanlar</h3>
+                </div>
+                <table className="w-full text-left text-sm text-slate-600">
+                  <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="px-6 py-4">Tip</th>
+                      <th className="px-6 py-4">Kim / Ne</th>
+                      <th className="px-6 py-4 w-1/3">Ban Sebebi</th>
+                      <th className="px-6 py-4">Ceza Bitiş</th>
+                      <th className="px-6 py-4 text-center">İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {getBannedUsers().map((u) => (
+                      <tr key={`user-${u.id}`} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <span className="bg-fuchsia-50 text-fuchsia-600 px-2 py-1 rounded text-[10px] font-black">KULLANICI</span>
+                        </td>
+                        <td className="px-6 py-4 font-bold text-slate-700">@{u.username}</td>
+                        <td className="px-6 py-4 text-xs text-rose-500 font-medium">{u.ban_reason || "Sebep belirtilmemiş."}</td>
+                        <td className="px-6 py-4 font-mono text-xs">
+                          {!u.is_active ? "SÜRESİZ BAN" : new Date(u.banned_until).toLocaleDateString("tr-TR")}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            onClick={() => navigate(`/admin-dashboard/users/${u.id}`)}
+                            className="text-blue-500 hover:underline font-bold text-xs">
+                            Detay
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {getBannedItems().map((i) => (
+                      <tr key={`item-${i.id}`} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <span className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded text-[10px] font-black">İLAN</span>
+                        </td>
+                        <td className="px-6 py-4 font-bold text-slate-700 truncate max-w-[200px]">{i.title}</td>
+                        <td className="px-6 py-4 text-xs text-rose-500 font-medium">{i.ban_reason || "Kurallara aykırı içerik."}</td>
+                        <td className="px-6 py-4 font-mono text-xs">
+                          {i.banned_until ? new Date(i.banned_until).toLocaleDateString("tr-TR") : "Bilinmiyor"}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            onClick={() => navigate(`/admin-dashboard/items/${i.id}`)}
+                            className="text-blue-500 hover:underline font-bold text-xs">
+                            Detay
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {getBannedUsers().length === 0 && getBannedItems().length === 0 && (
+                      <tr>
+                        <td colSpan="5" className="text-center py-10 text-slate-400 font-medium text-sm">
+                          Sistemde yasaklı kimse bulunmuyor. Temiz!
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "users" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Tüm Kullanıcılar</h3>
+              </div>
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
                   <tr>
-                    <th className="px-6 py-4">Kullanıcı</th>
-                    <th className="px-6 py-4">Kayıt</th>
+                    <th className="px-6 py-4">Kullanıcı Bilgileri</th>
                     <th className="px-6 py-4">Cüzdan</th>
                     <th className="px-6 py-4">Yetki</th>
+                    <th className="px-6 py-4 text-center">İşlem</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/50">
+                <tbody className="divide-y divide-slate-100">
                   {users.map((user) => (
-                    <tr key={user.id} onClick={() => openUserGodMode(user)} className="hover:bg-slate-800/50 cursor-pointer group">
-                      <td className="px-6 py-4">
-                        <div className="font-bold text-slate-200 group-hover:text-indigo-400">
-                          {user.first_name} {user.last_name}
+                    <tr key={user.id} className="hover:bg-blue-50/50 transition-colors group">
+                      <td className="px-6 py-4 flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-600">
+                          {user.username[0].toUpperCase()}
                         </div>
-                        <div className="text-xs text-slate-500">@{user.username}</div>
+                        <div>
+                          <div className="font-bold text-slate-800">
+                            {user.first_name} {user.last_name}
+                          </div>
+                          <div className="text-xs text-slate-400">@{user.username}</div>
+                        </div>
                       </td>
-                      <td className="px-6 py-4 font-mono text-xs">{user.date_joined.split(" ")[0]}</td>
-                      <td className="px-6 py-4 font-black text-emerald-500">₺{user.wallet_balance}</td>
+                      <td className="px-6 py-4 font-black text-slate-700 text-lg">₺{user.wallet_balance}</td>
                       <td className="px-6 py-4">
                         {user.is_staff ? (
-                          <span className="bg-rose-500/10 text-rose-500 text-[9px] font-black px-2 py-1 rounded">ADMIN</span>
+                          <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-full">YÖNETİCİ</span>
                         ) : (
-                          <span className="bg-slate-800 text-slate-400 text-[9px] font-black px-2 py-1 rounded">USER</span>
+                          <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2.5 py-1 rounded-full">ÜYE</span>
                         )}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button
+                          onClick={() => navigate(`/admin-dashboard/users/${user.id}`)}
+                          className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-lg font-bold transition-all">
+                          İncele
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </motion.div>
-        )}
+          )}
 
-        {/* 📦 4. İLANLAR */}
-        {activeTab === "items" && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {items.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => openItemGodMode(item)}
-                className="bg-slate-900 p-4 rounded-2xl border border-slate-800 hover:border-emerald-500/50 cursor-pointer shadow-xl flex gap-4 items-center">
-                <img
-                  src={item.images?.[0]?.image || "https://via.placeholder.com/80"}
-                  alt="item"
-                  className="w-16 h-16 rounded-xl object-cover border border-slate-700"
-                />
-                <div className="flex-1 overflow-hidden">
-                  <h3 className="text-sm font-bold text-slate-200 truncate">{item.title}</h3>
-                  <div className="text-[10px] text-slate-500 mt-1">@{item.owner_username}</div>
-                  <div className="text-lg font-black text-slate-300 mt-1">₺{item.price_per_day}</div>
-                </div>
-              </div>
-            ))}
-          </motion.div>
-        )}
-
-        {/* 🚨 5. KRİZ MERKEZİ */}
-        {activeTab === "disputes" && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {disputes.map((booking) => (
-              <div key={booking.id} className="bg-slate-900 p-5 rounded-2xl border border-rose-500/30 shadow-xl">
-                <h3 className="text-sm font-bold text-slate-100">{booking.item_detail.title}</h3>
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 my-4 text-sm text-slate-300 italic">
-                  "{booking.dispute_reason}"
-                </div>
-                <button
-                  onClick={() => setSelectedDispute(booking)}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg border border-slate-700">
-                  Kanıtları Karşılaştır & Çöz
-                </button>
-              </div>
-            ))}
-          </motion.div>
-        )}
-
-        {/* 📋 6. GLOBAL LOGLAR */}
-        {activeTab === "logs" && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-black/95 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-            <div className="bg-slate-900 border-b border-slate-800 px-4 py-2 text-[10px] text-slate-500 font-mono">
-              <span className="text-emerald-400">root@godmode</span>:/var/log/global.log
-            </div>
-            <div className="p-4 h-[600px] overflow-y-auto font-mono text-[11px] md:text-xs space-y-2 scrollbar-thin">
-              {logs.map((log) => (
+          {activeTab === "items" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {items.map((item) => (
                 <div
-                  key={log.id}
-                  className="flex flex-col md:flex-row md:items-start gap-1 md:gap-3 border-b border-slate-900/50 pb-1.5 hover:bg-slate-900/30">
-                  <span className="text-slate-500 shrink-0">[{log.created_at_formatted}]</span>
-                  <span className="shrink-0 font-bold w-32 text-indigo-400">{log.action_type}</span>
-                  <span className="text-slate-400 w-24">@{log.username}</span>
-                  <span className="text-slate-300 flex-1">{log.description}</span>
+                  key={item.id}
+                  className="bg-white p-5 rounded-2xl border border-slate-200 hover:border-blue-300 shadow-sm hover:shadow-md transition-all flex flex-col group relative">
+                  <div className="flex gap-4 items-center mb-4">
+                    <img
+                      src={item.images?.[0]?.image || "https://via.placeholder.com/80"}
+                      alt="item"
+                      className="w-16 h-16 rounded-xl object-cover border border-slate-100"
+                    />
+                    <div className="flex-1 overflow-hidden">
+                      <h3 className="text-sm font-bold text-slate-800 truncate">{item.title}</h3>
+                      <div className="text-xs text-slate-400 mt-1">@{item.owner_username}</div>
+                      <div className="text-lg font-black text-slate-800 mt-1">₺{item.price_per_day}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/admin-dashboard/items/${item.id}`)}
+                    className="w-full bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 font-bold text-xs py-2.5 rounded-xl border border-slate-200 transition-colors">
+                    Detaylı İncele
+                  </button>
                 </div>
               ))}
             </div>
-          </motion.div>
-        )}
-      </div>
+          )}
 
-      {/* ================= MODALLAR ================= */}
-
-      {/* KULLANICI MODALI */}
-      <AnimatePresence>
-        {selectedUser && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-slate-900 border border-slate-700 shadow-2xl rounded-3xl w-full max-w-3xl overflow-hidden my-8">
-              <div className="bg-slate-950 border-b border-slate-800">
-                <div className="p-6 pb-4 flex justify-between items-center">
-                  <div>
-                    <h2 className="text-2xl font-black text-indigo-400">@{selectedUser.username}</h2>
+          {activeTab === "categories" && (
+            <div className="space-y-6">
+              <div className="flex justify-end">
+                <button
+                  onClick={() => openCategoryModal()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-md shadow-blue-500/20 active:scale-95 text-sm flex items-center gap-2">
+                  <span>➕</span> Yeni Kategori
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {categories.map((cat) => (
+                  <div
+                    key={cat.id}
+                    className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex justify-between items-center group">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-base">{cat.name}</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">/{cat.slug}</p>
+                    </div>
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => openCategoryModal(cat)}
+                        className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center transition-colors">
+                        ✎
+                      </button>
+                      <button
+                        onClick={() => requestDelete("category", cat)}
+                        className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors">
+                        🗑️
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={() => setSelectedUser(null)} className="text-slate-500 bg-slate-800 rounded-full w-8 h-8">
-                    ✕
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "bookings" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Tüm Kiralamalar</h3>
+              </div>
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4">Kiralama ID</th>
+                    <th className="px-6 py-4">Ürün</th>
+                    <th className="px-6 py-4">Süreç</th>
+                    <th className="px-6 py-4 text-center">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {bookings.map((booking) => (
+                    <tr key={booking.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 font-mono text-xs text-slate-500">#{booking.id.split("-")[0]}</td>
+                      <td className="px-6 py-4 font-bold text-slate-800">{booking.item_detail?.title || "Bilinmiyor"}</td>
+                      <td className="px-6 py-4">
+                        <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-bold">{booking.status}</span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button
+                          onClick={() => requestDelete("booking", booking)}
+                          className="text-xs text-rose-500 hover:text-rose-700 font-bold hover:underline">
+                          SİL
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTab === "reviews" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Tüm Yorumlar</h3>
+              </div>
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4">Kullanıcı</th>
+                    <th className="px-6 py-4">Ürün</th>
+                    <th className="px-6 py-4 w-1/2">Yorum & Puan</th>
+                    <th className="px-6 py-4 text-center">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {reviews.map((review) => (
+                    <tr key={review.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 font-bold text-slate-700">@{review.reviewer_username}</td>
+                      <td className="px-6 py-4 font-semibold text-slate-600">{review.item_title || "Bilinmiyor"}</td>
+                      <td className="px-6 py-4">
+                        <div className="text-amber-500 text-xs mb-1">{"⭐".repeat(review.rating)}</div>
+                        <div className="text-slate-500 italic">"{review.comment}"</div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button
+                          onClick={() => requestDelete("review", review)}
+                          className="text-xs text-rose-500 hover:text-rose-700 font-bold hover:underline">
+                          SİL
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTab === "disputes" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {disputes.map((booking) => (
+                <div key={booking.id} className="bg-white p-6 rounded-3xl border border-rose-200 shadow-sm relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-rose-50 rounded-full blur-xl pointer-events-none"></div>
+                  <div className="text-[10px] font-black tracking-widest text-rose-500 mb-2 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>AÇIK ANLAŞMAZLIK
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 mb-4">{booking.item_detail.title}</h3>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-5">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">Şikayet Nedeni</div>
+                    <div className="text-sm text-slate-600 italic">"{booking.dispute_reason}"</div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedDispute(booking)}
+                    className="w-full py-3 bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold rounded-xl shadow-md shadow-rose-500/20 active:scale-95 transition-all">
+                    Dosyayı İncele
                   </button>
                 </div>
-                <div className="flex px-6 gap-6 text-sm font-bold">
-                  <button
-                    onClick={() => setUserModalTab("info")}
-                    className={`pb-3 border-b-2 ${userModalTab === "info" ? "border-indigo-500 text-indigo-400" : "border-transparent text-slate-500"}`}>
-                    Genel Bilgiler
-                  </button>
-                  <button
-                    onClick={() => setUserModalTab("items")}
-                    className={`pb-3 border-b-2 ${userModalTab === "items" ? "border-emerald-500 text-emerald-400" : "border-transparent text-slate-500"}`}>
-                    Açtığı İlanlar
-                  </button>
-                  <button
-                    onClick={() => setUserModalTab("logs")}
-                    className={`pb-3 border-b-2 ${userModalTab === "logs" ? "border-amber-500 text-amber-400" : "border-transparent text-slate-500"}`}>
-                    Hareket Logları
-                  </button>
+              ))}
+            </div>
+          )}
+
+          {activeTab === "logs" && (
+            <div className="bg-slate-800 border border-slate-700 rounded-3xl overflow-hidden shadow-xl">
+              <div className="bg-slate-900 border-b border-slate-800 px-5 py-3 text-xs text-slate-400 font-mono flex items-center justify-between">
+                <div>
+                  <span className="text-emerald-400">admin</span>@server:~/logs$ tail -f system.log
                 </div>
+              </div>
+              <div className="p-5 h-[600px] overflow-y-auto font-mono text-xs space-y-2 scrollbar-thin scrollbar-thumb-slate-600 text-slate-300">
+                {logs.map((log) => (
+                  <div key={log.id} className="flex gap-4 border-b border-slate-700/50 pb-2 hover:bg-slate-700/30 transition-colors">
+                    <span className="text-slate-500 shrink-0">[{log.created_at_formatted}]</span>
+                    <span className="shrink-0 font-bold w-32 text-blue-400">{log.action_type}</span>
+                    <span className="text-slate-400 w-28 shrink-0">@{log.username}</span>
+                    <span className="text-slate-200 flex-1">{log.description}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* ======================= MODALLAR ======================= */}
+
+      {/* 🎯 DESTEK VE ŞİKAYET YANIT MODALI */}
+      <AnimatePresence>
+        {supportModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white shadow-2xl rounded-3xl w-full max-w-2xl my-8 overflow-hidden">
+              <div className="bg-slate-50 border-b border-slate-200 p-6 flex justify-between items-center">
+                <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  {supportModal.type === "ticket" ? "🎫 Destek Biletini Yanıtla" : "🚩 Şikayeti Yanıtla"}
+                </h2>
+                <button
+                  onClick={() => setSupportModal({ isOpen: false, type: null, data: null })}
+                  className="text-slate-400 hover:text-slate-600 font-bold text-lg">
+                  ✕
+                </button>
               </div>
 
               <div className="p-6">
-                {userModalTab === "info" && (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-[10px] uppercase font-black text-slate-500 mb-1 block">Cüzdan Bakiyesi</label>
-                        <input
-                          type="number"
-                          value={userForm.wallet_balance}
-                          onChange={(e) => setUserForm({ ...userForm, wallet_balance: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-800 text-emerald-400 font-black text-xl rounded-xl p-3"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] uppercase font-black text-slate-500 mb-1 block">Güven Puanı</label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={userForm.trust_score}
-                          onChange={(e) => setUserForm({ ...userForm, trust_score: e.target.value })}
-                          className="w-full bg-slate-950 border border-slate-800 text-amber-400 font-black text-xl rounded-xl p-3"
-                        />
-                      </div>
+                <div className="bg-slate-100 p-5 rounded-2xl border border-slate-200 mb-6">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                      Gönderen: @{supportModal.type === "ticket" ? supportModal.data.user_username : supportModal.data.reporter_username}
                     </div>
-                    <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
-                      <div className="text-sm font-bold text-slate-200">Sistem Yöneticisi Yap</div>
-                      <input
-                        type="checkbox"
-                        checked={userForm.is_staff}
-                        onChange={(e) => setUserForm({ ...userForm, is_staff: e.target.checked })}
-                        className="w-6 h-6 accent-indigo-500 cursor-pointer"
+                    <div className="text-[10px] font-mono text-slate-400">{supportModal.data.created_at_formatted}</div>
+                  </div>
+                  <h3 className="font-bold text-slate-800 mb-2">
+                    {supportModal.type === "ticket" ? supportModal.data.subject : `Şikayet Sebebi: ${supportModal.data.reason}`}
+                  </h3>
+                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{supportModal.data.description}</p>
+
+                  {(supportModal.data.attachment || supportModal.data.proof_image) && (
+                    <div className="mt-4 border-t border-slate-200 pt-4">
+                      <div className="text-[10px] uppercase font-bold text-slate-500 mb-2">Eklenen Kanıt / Görsel</div>
+                      <img
+                        src={supportModal.data.attachment || supportModal.data.proof_image}
+                        alt="Kanıt"
+                        className="w-full max-h-64 object-contain bg-slate-200 rounded-xl border border-slate-300"
                       />
                     </div>
-                    <div className="flex gap-3 pt-4">
-                      <button
-                        onClick={() => requestDelete("user", selectedUser)}
-                        className="px-6 py-3 bg-rose-500/10 text-rose-500 rounded-xl font-bold">
-                        Kullanıcıyı Sil
-                      </button>
-                      <div className="flex-1"></div>
-                      <button onClick={handleUpdateUser} className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-bold">
-                        Kaydet
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
-                {userModalTab === "items" && (
-                  <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-thin">
-                    {items
-                      .filter((i) => i.owner_username === selectedUser.username)
-                      .map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex justify-between items-center p-3 bg-slate-950 border border-slate-800 rounded-xl">
-                          <div className="text-sm text-slate-200 font-bold">{item.title}</div>
-                          <button
-                            onClick={() => {
-                              setSelectedUser(null);
-                              openItemGodMode(item);
-                            }}
-                            className="text-xs bg-slate-800 text-white px-3 py-2 rounded-lg">
-                            İncele
-                          </button>
-                        </div>
-                      ))}
+                <form onSubmit={handleSendSupportReply} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      RentCircle Destek Olarak Yanıtla
+                    </label>
+                    <textarea
+                      rows="4"
+                      required
+                      placeholder="Kullanıcıya iletilecek resmi sistem mesajını buraya yazın..."
+                      value={supportReplyText}
+                      onChange={(e) => setSupportReplyText(e.target.value)}
+                      className="w-full bg-white border border-slate-200 focus:border-blue-500 text-slate-800 text-sm rounded-xl p-4 outline-none resize-none transition-colors"></textarea>
+                    <p className="text-[10px] text-slate-400">
+                      Bu mesaj kullanıcının gelen kutusuna "RentCircle Destek" resmi adıyla düşecektir.
+                    </p>
                   </div>
-                )}
-
-                {userModalTab === "logs" && (
-                  <div className="space-y-4">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setLogFilter("all")}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-lg border ${logFilter === "all" ? "bg-slate-800 text-white border-slate-700" : "text-slate-500 border-slate-800"}`}>
-                        Tümü
-                      </button>
-                      <button
-                        onClick={() => setLogFilter("wallet")}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-lg border ${logFilter === "wallet" ? "bg-emerald-900/50 text-emerald-400 border-emerald-800" : "text-slate-500 border-slate-800"}`}>
-                        Cüzdan
-                      </button>
-                      <button
-                        onClick={() => setLogFilter("operations")}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-lg border ${logFilter === "operations" ? "bg-blue-900/50 text-blue-400 border-blue-800" : "text-slate-500 border-slate-800"}`}>
-                        Kiralama & İlan
-                      </button>
-                    </div>
-                    <div className="bg-black/90 rounded-xl border border-slate-800 p-4 h-[350px] overflow-y-auto font-mono text-[11px] space-y-2 scrollbar-thin">
-                      {selectedUserLogs
-                        .filter((log) => {
-                          if (logFilter === "wallet") return log.action_type.includes("PARA");
-                          if (logFilter === "operations") return !log.action_type.includes("PARA");
-                          return true;
-                        })
-                        .map((log) => (
-                          <div key={log.id} className="flex gap-3 border-b border-slate-900/80 pb-2 hover:bg-slate-900/30">
-                            <span className="text-slate-500 shrink-0">[{log.created_at_formatted}]</span>
-                            <span
-                              className={`shrink-0 font-bold w-24 ${log.action_type.includes("PARA") ? "text-emerald-400" : "text-blue-400"}`}>
-                              {log.action_type}
-                            </span>
-                            <span className="text-slate-300 break-words">{log.description}</span>
-                          </div>
-                        ))}
-                    </div>
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setSupportModal({ isOpen: false, type: null, data: null })}
+                      className="px-6 py-3 text-slate-500 font-bold hover:bg-slate-100 rounded-xl text-xs transition-colors">
+                      İptal
+                    </button>
+                    <div className="flex-1"></div>
+                    <button
+                      type="submit"
+                      disabled={isReplying}
+                      className="px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-50 flex items-center gap-2">
+                      {isReplying ? "Gönderiliyor..." : "Mesajı Gönder 🚀"}
+                    </button>
                   </div>
-                )}
+                </form>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* İLAN MODALI */}
       <AnimatePresence>
-        {selectedItem && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+        {isCategoryModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-slate-900 border border-slate-700 shadow-2xl rounded-3xl w-full max-w-2xl overflow-hidden my-8">
-              <div className="p-6 bg-slate-950 border-b border-slate-800 flex justify-between items-start">
-                <div className="flex gap-4">
-                  <img src={selectedItem.images?.[0]?.image} className="w-16 h-16 rounded-xl object-cover" alt="img" />
-                  <div>
-                    <h2 className="text-lg font-black text-emerald-400">{selectedItem.title}</h2>
-                    <div className="text-xs text-slate-500 font-mono mt-1">Sahibi: @{selectedItem.owner_username}</div>
-                  </div>
-                </div>
-                <button onClick={() => setSelectedItem(null)} className="text-slate-500 hover:text-white bg-slate-800 rounded-full w-8 h-8">
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white shadow-2xl rounded-3xl w-full max-w-md overflow-hidden">
+              <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <h2 className="text-lg font-bold text-slate-800">{selectedCategory ? "Kategori Düzenle" : "Yeni Kategori Ekle"}</h2>
+                <button onClick={() => setIsCategoryModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                   ✕
                 </button>
               </div>
-
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="text-[10px] uppercase font-black text-slate-500 mb-1 block">Fiyat (₺)</label>
+              <div className="p-6 space-y-5">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-slate-500">Kategori Adı</label>
                   <input
-                    type="number"
-                    value={itemForm.price_per_day}
-                    onChange={(e) => setItemForm({ ...itemForm, price_per_day: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 text-emerald-400 font-black rounded-xl p-3"
+                    type="text"
+                    value={categoryForm.name}
+                    onChange={(e) => setCategoryForm({ name: e.target.value })}
+                    className="w-full border border-slate-200 focus:border-blue-500 text-slate-800 font-medium text-sm rounded-xl p-3 outline-none"
                   />
                 </div>
-
-                <div className="flex gap-3 pt-6 border-t border-slate-800">
+                <div className="flex gap-3 pt-2">
                   <button
-                    onClick={() => requestDelete("item", selectedItem)}
-                    className="px-6 py-3 bg-rose-500/10 text-rose-500 rounded-xl font-bold">
-                    İlanı Sil
+                    onClick={() => setIsCategoryModalOpen(false)}
+                    className="px-6 py-2.5 text-slate-500 font-bold hover:bg-slate-100 rounded-xl text-xs transition-colors">
+                    İptal
                   </button>
                   <div className="flex-1"></div>
-                  <button onClick={handleUpdateItem} className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-bold">
+                  <button
+                    onClick={handleSaveCategory}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-md shadow-blue-500/20 active:scale-95">
                     Kaydet
                   </button>
                 </div>
@@ -656,94 +1056,52 @@ const AdminDashboard = () => {
         )}
       </AnimatePresence>
 
-      {/* DISPUTE (ANLAŞMAZLIK) MODALI - TAM KAPSAMLI EKLENDİ */}
-      <AnimatePresence>
-        {selectedDispute && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-slate-900 border border-slate-700 shadow-2xl rounded-3xl w-full max-w-4xl overflow-hidden my-8">
-              <div className="p-6 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
-                <h2 className="text-xl font-black text-rose-400">🚨 Anlaşmazlık Dosyası</h2>
-                <button onClick={() => setSelectedDispute(null)} className="text-slate-500 hover:text-white">
-                  ✕ Kapat
-                </button>
-              </div>
-              <div className="p-6 space-y-6">
-                <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-xl">
-                  <h3 className="text-[10px] text-rose-400 uppercase font-black mb-1">İtiraz Gerekçesi</h3>
-                  <p className="text-slate-200 text-sm">"{selectedDispute.dispute_reason}"</p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Teslimat */}
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <h4 className="font-bold text-indigo-400 mb-2 border-b border-slate-800 pb-2">📦 Teslimat (Kiracı)</h4>
-                    <div className="text-xs text-slate-400 mb-2">Not: "{selectedDispute.handover_notes || "-"}"</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {selectedDispute.handover_images?.map((img) => (
-                        <a key={img.id} href={img.image} target="_blank" rel="noreferrer">
-                          <img
-                            src={img.image}
-                            className="w-full h-24 object-cover rounded border border-slate-700 hover:border-indigo-500"
-                            alt="img"
-                          />
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                  {/* İade */}
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <h4 className="font-bold text-fuchsia-400 mb-2 border-b border-slate-800 pb-2">🔄 İade (Satıcı)</h4>
-                    <div className="text-xs text-slate-400 mb-2">Not: "{selectedDispute.return_notes || "-"}"</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {selectedDispute.return_images?.map((img) => (
-                        <a key={img.id} href={img.image} target="_blank" rel="noreferrer">
-                          <img
-                            src={img.image}
-                            className="w-full h-24 object-cover rounded border border-slate-700 hover:border-fuchsia-500"
-                            alt="img"
-                          />
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-4 pt-4 border-t border-slate-800">
-                  <button
-                    onClick={() => handleResolveDispute(selectedDispute.id, "owner")}
-                    className="flex-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500 hover:bg-emerald-500 hover:text-white py-3 rounded-xl font-bold transition-all">
-                    Satıcı Haklı (Hasar Var)
-                  </button>
-                  <button
-                    onClick={() => handleResolveDispute(selectedDispute.id, "renter")}
-                    className="flex-1 bg-blue-500/10 text-blue-400 border border-blue-500 hover:bg-blue-500 hover:text-white py-3 rounded-xl font-bold transition-all">
-                    Kiracı Haklı (Sorunsuz)
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+      {selectedDispute && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white shadow-2xl rounded-3xl w-full max-w-2xl p-8 overflow-hidden">
+            <h2 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">
+              <span className="text-rose-500">🚨</span> Anlaşmazlık: {selectedDispute.item_detail.title}
+            </h2>
+            <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 mb-6">
+              <div className="text-[10px] uppercase font-bold text-slate-500 mb-2">Şikayet Açıklaması</div>
+              <div className="text-sm text-slate-700 font-medium leading-relaxed">"{selectedDispute.dispute_reason}"</div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleResolveDispute(selectedDispute.id, "owner")}
+                className="flex-1 bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white border border-emerald-200 py-3 rounded-xl font-bold text-xs transition-colors">
+                Satıcı Haklı
+              </button>
+              <button
+                onClick={() => handleResolveDispute(selectedDispute.id, "renter")}
+                className="flex-1 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white border border-blue-200 py-3 rounded-xl font-bold text-xs transition-colors">
+                Kiracı Haklı
+              </button>
+              <button
+                onClick={() => setSelectedDispute(null)}
+                className="px-6 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-xs transition-colors">
+                Kapat
+              </button>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
 
-      {/* ================= PENDING ACTION BAR (GERİ ALMA BARI) ================= */}
       <AnimatePresence>
         {pendingAction && (
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] bg-slate-800 text-white border border-slate-700 shadow-2xl px-6 py-4 rounded-2xl flex items-center gap-6">
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] bg-slate-800 text-white shadow-2xl px-6 py-4 rounded-2xl flex items-center gap-6">
             <div>
-              <div className="font-bold">{pendingAction.type === "user" ? "Kullanıcı" : "İlan"} siliniyor...</div>
-              <div className="text-xs text-slate-400">İşlem 5 saniye içinde tamamlanacak.</div>
+              <div className="font-bold text-sm text-white">İşlem siliniyor...</div>
+              <div className="text-xs text-slate-400 mt-0.5">5 saniye içinde tamamlanacak.</div>
             </div>
             <button
               onClick={undoDelete}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black px-4 py-2 rounded-xl transition-colors shadow-lg shadow-emerald-500/20">
-              Geri Al (Undo)
+              className="bg-blue-500 hover:bg-blue-400 text-white font-bold px-4 py-2 rounded-lg shadow-md transition-colors text-xs">
+              Geri Al
             </button>
           </motion.div>
         )}
