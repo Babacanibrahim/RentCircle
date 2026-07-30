@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import axios from "axios";
 import formattedTurkeyData from "../auth/data/parseData";
 import { itemApi } from "../items/services/itemApi";
+import { authApi } from "../auth/services/authApi";
 import { toast, cyberConfirm } from "../../utils/alerts";
 
 const Navbar = ({ onLocationFilter }) => {
@@ -71,6 +72,7 @@ const Navbar = ({ onLocationFilter }) => {
     }
   };
 
+  // 🎯 DÜZELTME: MİSAFİR KULLANICI KORUMASI (401 HATASINI ENGELLEME)
   useEffect(() => {
     let notifInterval;
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
@@ -78,11 +80,14 @@ const Navbar = ({ onLocationFilter }) => {
     if (token) {
       setIsLoggedIn(true);
       try {
+        // Token varsa ID'yi çözümle
         const base64Url = token.split(".")[1];
         const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
         const payload = JSON.parse(window.atob(base64));
         setCurrentUserId(payload.user_id);
 
+        // Profil verilerini Axios Instance (Interceptors'a yakalanmamak için standart axios üzerinden) çekmiyoruz
+        // Burayı istersen axiosInstance üzerinden veya standart authApi ile çekebilirsin.
         axios
           .get("http://localhost:8000/api/auth/me/", {
             headers: { Authorization: `Bearer ${token}` },
@@ -111,22 +116,30 @@ const Navbar = ({ onLocationFilter }) => {
             }
           })
           .catch((err) => {
+            // Eğer profil çekilirken bir sorun olursa misafiri rahatsız etme, sadece konumu sıfırla
             if (onLocationFilter) onLocationFilter({ city: "", district: "" });
           });
 
+        // 🎯 SADECE TOKEN VARSA (ÜYE İSE) BİLDİRİMLERİ ÇEK!
         const fetchNotifs = () => {
           itemApi
             .getNotifications()
             .then((data) => setNotifications(data))
-            .catch((err) => console.error("Bildirimler çekilemedi:", err));
+            .catch((err) => {
+              // Sessizce hatayı yakala (Console'u doldurmaya gerek yok)
+            });
         };
 
         fetchNotifs();
+        // 10 saniyede bir bildirim çekme döngüsü SADECE GİRİŞ YAPMIŞ KİŞİLERE çalışacak
         notifInterval = setInterval(fetchNotifs, 10000);
       } catch (e) {
         if (onLocationFilter) onLocationFilter({ city: "", district: "" });
       }
     } else {
+      // 🎯 MİSAFİR KULLANICI İÇİN: Hiçbir API'ye istek atma, sadece default değerleri ayarla
+      setIsLoggedIn(false);
+      setIsAdmin(false);
       if (onLocationFilter) onLocationFilter({ city: "", district: "" });
     }
 
@@ -472,7 +485,6 @@ const Navbar = ({ onLocationFilter }) => {
                   </AnimatePresence>
                 </div>
 
-                {/* 🎯 DÜZELTME: YÖNETİCİ PANELİ BUTONU (Tıklanabilir ve Şık) */}
                 {isAdmin && (
                   <button
                     onClick={() => (window.location.href = "/admin-dashboard")}

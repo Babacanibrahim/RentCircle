@@ -28,13 +28,13 @@ import AdminItemDetail from "./features/admin/views/AdminItemDetail";
 
 function App() {
   const isAuthenticated = !!(localStorage.getItem("access_token") || sessionStorage.getItem("access_token"));
-
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />} />
+        {/* 🎯 DÜZELTME BURADA: Giren herkes şartsız olarak vitrine (Dashboard) yönlendirilir */}
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-        {/* --- LAYOUT DIŞINDA KALANLAR (NAVBAR VE FOOTER OLMAYACAK) --- */}
+        {/* --- LAYOUT DIŞINDA KALANLAR --- */}
         <Route
           path="/login"
           element={
@@ -60,7 +60,7 @@ function App() {
           }
         />
 
-        {/* 🎯 DÜZELTİLDİ: Admin Dashboard Rotası (Syntax hatası giderildi ve güvenliğe alındı) */}
+        {/* --- ADMIN SAYFALARI --- */}
         <Route
           path="/admin-dashboard"
           element={
@@ -69,7 +69,6 @@ function App() {
             </PrivateRoute>
           }
         />
-
         <Route
           path="/admin-dashboard/users/:id"
           element={
@@ -87,16 +86,13 @@ function App() {
           }
         />
 
-        {/* --- LAYOUT İÇİNDE KALANLAR (NAVBAR VE FOOTER OTOMATİK EKLENECEK) --- */}
+        {/* --- LAYOUT İÇİNDE KALANLAR (NAVBAR VE FOOTER EKLENECEK) --- */}
         <Route element={<MainLayout />}>
-          <Route
-            path="/dashboard"
-            element={
-              <PrivateRoute>
-                <ItemDashboard />
-              </PrivateRoute>
-            }
-          />
+          {/* 🟢 MİSAFİRLERE AÇIK VİTRİN SAYFALARI */}
+          <Route path="/dashboard" element={<ItemDashboard />} />
+          <Route path="/listings/:id" element={<ItemDetail />} />
+          <Route path="/stores/:id" element={<StoreDetail />} /> {/* Bulanık ekran (Login Wall) çıkacak */}
+          {/* 🔴 SADECE ÜYELERE AÇIK SAYFALAR */}
           <Route
             path="/profile"
             element={
@@ -142,22 +138,6 @@ function App() {
             element={
               <PrivateRoute>
                 <RentalHistory />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/listings/:id"
-            element={
-              <PrivateRoute>
-                <ItemDetail />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/stores/:id"
-            element={
-              <PrivateRoute>
-                <StoreDetail />
               </PrivateRoute>
             }
           />

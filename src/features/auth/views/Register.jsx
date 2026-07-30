@@ -56,6 +56,18 @@ const Register = () => {
       return toast.fire({ icon: "error", title: "Girdiğiniz şifreler birbiriyle uyuşmuyor." });
     }
 
+    if (formData.password.length < 8) {
+      setIsSubmitting(false);
+      return toast.fire({ icon: "warning", title: "Şifreniz çok kısa. Güvenliğiniz için en az 8 karakterli bir şifre belirleyin." });
+    }
+    if (!/\d/.test(formData.password) || !/[a-zA-Z]/.test(formData.password)) {
+      setIsSubmitting(false);
+      return toast.fire({
+        icon: "warning",
+        title: "Şifreniz çok zayıf. Lütfen içinde hem harf hem de rakam bulunan daha güçlü bir şifre belirleyin.",
+      });
+    }
+
     if (formData.date_of_birth) {
       const dob = new Date(formData.date_of_birth);
       const today = new Date();
@@ -94,7 +106,21 @@ const Register = () => {
         occupation: "",
       });
     } catch (err) {
-      const errMsg = err.response?.data ? Object.values(err.response.data).flat().join(" ") : "Bir hata oluştu.";
+      // 🎯 UX DOSTU HATA YÖNETİMİ
+      const errData = err.response?.data;
+      let errMsg = "Kayıt olurken beklenmeyen bir hata oluştu.";
+
+      if (errData?.email) {
+        errMsg = "Bu e-posta adresiyle daha önce bir hesap oluşturulmuş. Şifrenizi unuttuysanız giriş ekranından sıfırlayabilirsiniz.";
+      } else if (errData?.username) {
+        errMsg = "Bu kullanıcı adı maalesef başkası tarafından kullanılıyor. Lütfen başka bir kullanıcı adı seçin.";
+      } else if (errData?.phone) {
+        errMsg =
+          "Bu telefon numarasıyla kayıtlı bir hesap zaten var. Şifrenizi unuttuysanız 'Şifremi Unuttum' sayfasından yeni şifre alabilirsiniz.";
+      } else if (errData) {
+        errMsg = Object.values(errData).flat().join(" ");
+      }
+
       toast.fire({ icon: "error", title: errMsg });
     } finally {
       setIsSubmitting(false);

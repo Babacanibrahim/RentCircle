@@ -9,8 +9,8 @@ const ItemDashboard = () => {
   const navigate = useNavigate();
   const { locationFilter } = useOutletContext() || {};
 
-  // 🎯 YENİ: URL'den search parametresini yakalıyoruz
-  const [searchParams] = useSearchParams();
+  // 🎯 GÜNCELLEME: URL'den hem okumak hem de değiştirmek (silmek) için setSearchParams'ı da aldık
+  const [searchParams, setSearchParams] = useSearchParams();
   const searchWord = searchParams.get("search");
 
   const [items, setItems] = useState([]);
@@ -25,7 +25,7 @@ const ItemDashboard = () => {
   const [availableOnly, setAvailableOnly] = useState(false);
 
   useEffect(() => {
-    let isMounted = true; // 🎯 YENİ: Yarış durumunu (Race Condition) engelleme bayrağı
+    let isMounted = true;
 
     const fetchDashboardData = async () => {
       setLoading(true);
@@ -41,7 +41,6 @@ const ItemDashboard = () => {
 
         const [itemsData, categoriesData] = await Promise.all([itemApi.getListings(filters), itemApi.getCategories()]);
 
-        // 🎯 YENİ: Eğer yeni bir istek atılmadıysa (hala güncelsek) state'e yaz
         if (isMounted) {
           setItems(itemsData.results || itemsData);
           setCategories(categoriesData);
@@ -55,7 +54,6 @@ const ItemDashboard = () => {
 
     fetchDashboardData();
 
-    // 🎯 YENİ: Component kapanırsa veya useEffect TEKRAR tetiklenirse, önceki isteği iptal et/yok say
     return () => {
       isMounted = false;
     };
@@ -72,6 +70,14 @@ const ItemDashboard = () => {
 
   const handleCategoryToggle = (categoryId) => {
     setSelectedCategories((prev) => (prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [...prev, categoryId]));
+  };
+
+  // 🎯 YENİ: ARAMAYI SIFIRLAMA FONKSİYONU
+  const handleClearSearch = () => {
+    const newParams = new URLSearchParams(searchParams);
+    newParams.delete("search"); // URL'den sadece arama kelimesini siliyoruz
+    setSearchParams(newParams); // URL anında güncelleniyor ve useEffect otomatik tetiklenip filtresiz listeyi getiriyor!
+    toast.fire({ icon: "success", title: "Arama filtresi temizlendi." });
   };
 
   const filteredItems = items.filter((item) => {
@@ -109,7 +115,7 @@ const ItemDashboard = () => {
             <h1 className="text-2xl font-black tracking-tight text-slate-100">Güvenli Paylaşım Ekosistemi</h1>
             <p className="text-xs text-slate-400 mt-1">
               📍 {locationFilter?.city || "Tüm Türkiye"} {locationFilter?.district ? `- ${locationFilter.district}` : ""} bölgesindeki
-              ilanlar listeleniyor. {searchWord && <span className="font-bold text-blue-400 ml-1">("{searchWord}" aranıyor)</span>}
+              ilanlar listeleniyor.
             </p>
           </div>
           <button
@@ -132,6 +138,28 @@ const ItemDashboard = () => {
               <span className="text-lg">⚙️</span> {showFilters ? "Filtreleri Gizle" : "Gelişmiş Filtreler"}
             </button>
           </div>
+
+          {/* 🎯 YENİ: AKTİF ARAMA FİLTRESİ ÇİPİ (BADGE) */}
+          <AnimatePresence>
+            {searchWord && (
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+                className="flex items-center gap-2 mb-4">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Aktif Arama:</span>
+                <div className="flex items-center gap-2 bg-blue-500/10 text-blue-400 border border-blue-500/30 pl-3 pr-1 py-1 rounded-full text-xs font-bold shadow-sm backdrop-blur-sm">
+                  <span>"{searchWord}"</span>
+                  <button
+                    onClick={handleClearSearch}
+                    className="w-5 h-5 rounded-full hover:bg-rose-500 hover:text-white text-blue-400 flex items-center justify-center transition-all cursor-pointer"
+                    title="Aramayı Temizle">
+                    ✕
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <AnimatePresence>
             {showFilters && (
@@ -242,11 +270,12 @@ const ItemDashboard = () => {
             <span className="text-4xl mb-4 block">🏜️</span>
             <p className="text-sm font-bold text-slate-300">Bu kriterlere uygun ilan bulunamadı.</p>
             <p className="text-xs text-slate-500 mt-2 font-mono">Filtreleri esnetmeyi veya farklı bir arama yapmayı deneyin.</p>
+            {/* 🎯 GÜNCELLEME: Burada da arama temizleme fonksiyonumuzu kullandık */}
             {searchWord && (
               <button
-                onClick={() => navigate("/dashboard")}
+                onClick={handleClearSearch}
                 className="mt-4 text-xs font-bold text-blue-400 hover:text-blue-300 underline cursor-pointer">
-                Tüm İlanları Göster
+                Aramayı Temizle ve Tüm İlanları Göster
               </button>
             )}
           </div>

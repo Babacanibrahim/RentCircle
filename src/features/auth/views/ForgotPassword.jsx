@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { authApi } from "../services/authApi";
-import { toast } from "../../../utils/alerts"; // 🎯 YENİ
+import { toast } from "../../../utils/alerts";
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
@@ -16,18 +16,24 @@ const ForgotPassword = () => {
   const [passwords, setPasswords] = useState({ new_password: "", confirm_password: "" });
 
   const [timeLeft, setTimeLeft] = useState(180);
+  const [resendCooldown, setResendCooldown] = useState(10);
 
   useEffect(() => {
     let timer;
-    if (step === 2 && timeLeft > 0) {
+    if (step === 2) {
       timer = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
+        setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
+        setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
       }, 1000);
-    } else if (timeLeft === 0 && step === 2) {
-      toast.fire({ icon: "error", title: "Doğrulama kodunun süresi doldu." });
     }
     return () => clearInterval(timer);
-  }, [step, timeLeft]);
+  }, [step]);
+
+  useEffect(() => {
+    if (step === 2 && timeLeft === 0) {
+      toast.fire({ icon: "error", title: "Doğrulama kodunun süresi doldu. Lütfen yeni kod isteyin." });
+    }
+  }, [timeLeft, step]);
 
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60)
@@ -37,14 +43,25 @@ const ForgotPassword = () => {
     return `${m}:${s}`;
   };
 
-  const handleRequestOTP = async (e) => {
-    e.preventDefault();
+  // 🎯 YENİ: "isResend" parametresi ekledik. İlk istekte false, Tekrar Gönder'de true olacak.
+  const handleRequestOTP = async (e, isResend = false) => {
+    if (e) e.preventDefault();
     setLoading(true);
     try {
       const response = await authApi.forgotPasswordRequest({ method, identifier });
       toast.fire({ icon: "success", title: response.message });
+
       setStep(2);
       setTimeLeft(180);
+
+      // 🎯 DİNAMİK SAYAÇ KONTROLÜ
+      if (isResend) {
+        setResendCooldown(180); // Tekrar gönderimlerde artık 3 dakika (180 saniye) bekleyecek
+      } else {
+        setResendCooldown(10); // Sadece ilk sayfadan gelirken 10 saniye bekleyecek
+      }
+
+      setOtp("");
     } catch (err) {
       toast.fire({ icon: "error", title: "Bir hata oluştu, lütfen tekrar deneyin." });
     } finally {
@@ -69,9 +86,17 @@ const ForgotPassword = () => {
 
   const handleResetPassword = async (e) => {
     e.preventDefault();
+
     if (passwords.new_password !== passwords.confirm_password) {
-      return toast.fire({ icon: "warning", title: "Şifreler birbiriyle uyuşmuyor." });
+      return toast.fire({ icon: "error", title: "Şifreler birbiriyle uyuşmuyor." });
     }
+    if (passwords.new_password.length < 8) {
+      return toast.fire({ icon: "warning", title: "Yeni şifreniz çok kısa. En az 8 karakter belirleyin." });
+    }
+    if (!/\d/.test(passwords.new_password) || !/[a-zA-Z]/.test(passwords.new_password)) {
+      return toast.fire({ icon: "warning", title: "Şifreniz zayıf. Hem harf hem rakam içermelidir." });
+    }
+
     setLoading(true);
     try {
       const response = await authApi.resetPasswordConfirm({
@@ -93,14 +118,14 @@ const ForgotPassword = () => {
     <AuthLayout title="Şifre Kurtarma" subtitle="Hesabınıza tekrar erişmek için adımları takip edin.">
       <div className="relative overflow-hidden min-h-[300px]">
         <AnimatePresence mode="wait">
-          {/* STEP 1 */}
+          {/* STEP 1: KİMLİK DOĞRULAMA */}
           {step === 1 && (
             <motion.form
               key="step1"
               initial={{ x: -20, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: 20, opacity: 0 }}
-              onSubmit={handleRequestOTP}
+              onSubmit={(e) => handleRequestOTP(e, false)} // İlk istek olduğunu belirtiyoruz
               className="space-y-5">
               <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700/50">
                 <button
@@ -153,7 +178,7 @@ const ForgotPassword = () => {
             </motion.form>
           )}
 
-          {/* STEP 2 */}
+          {/* STEP 2: KOD DOĞRULAMA */}
           {step === 2 && (
             <motion.form
               key="step2"
@@ -190,10 +215,33 @@ const ForgotPassword = () => {
                 className="btn-gradient w-full p-3.5 mt-4 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-blue-500/20">
                 {loading ? "Doğrulanıyor..." : "Kodu Onayla"}
               </button>
+
+              {/* 🎯 TEKRAR GÖNDER BUTONU: 180 saniyeyi daha şık göstermek için formatTime kullandık */}
+              <button
+                type="button"
+                onClick={() => handleRequestOTP(null, true)} // Tekrar gönderim olduğunu belirten "true"
+                disabled={loading || resendCooldown > 0}
+                className={`w-full mt-3 p-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  resendCooldown > 0
+                    ? "bg-slate-800/50 text-slate-500 border border-slate-700/50 cursor-not-allowed"
+                    : "bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/30 active:scale-95"
+                }`}>
+                {resendCooldown > 0 ? `⏳ Tekrar Göndermek İçin Bekleyin (${formatTime(resendCooldown)})` : "🔄 Kodu Tekrar Gönder"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setStep(1);
+                  setOtp("");
+                }}
+                className="w-full mt-4 text-xs text-slate-500 hover:text-slate-300 font-mono transition-colors cursor-pointer hover:underline flex items-center justify-center gap-2">
+                <span>←</span> E-Posta Seçimine Geri Dön
+              </button>
             </motion.form>
           )}
 
-          {/* STEP 3 */}
+          {/* STEP 3: YENİ ŞİFRE BELİRLEME */}
           {step === 3 && (
             <motion.form
               key="step3"
@@ -202,6 +250,10 @@ const ForgotPassword = () => {
               exit={{ x: 20, opacity: 0 }}
               onSubmit={handleResetPassword}
               className="space-y-4">
+              <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-200/80 mb-4 leading-relaxed cursor-default">
+                ⚠️ Lütfen tahmin edilmesi zor, içinde hem harf hem de rakam bulunan en az 8 karakterli yeni bir şifre belirleyin.
+              </div>
+
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-400 cursor-default">Yeni Şifre</label>
                 <input

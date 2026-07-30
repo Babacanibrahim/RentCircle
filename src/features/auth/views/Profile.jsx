@@ -97,17 +97,45 @@ const Profile = () => {
       await authApi.updateProfile(payload);
       toast.fire({ icon: "success", title: "Profil bilgileriniz başarıyla güncellendi!" });
     } catch (error) {
+      // 🎯 UX DOSTU GÜNCELLEME HATALARI
       const errData = error.response?.data;
       let errMsg = "Güncelleme başarısız oldu. Lütfen bilgileri kontrol edin.";
-      if (errData?.email) errMsg = errData.email[0];
-      else if (errData?.username) errMsg = errData.username[0];
 
-      toast.fire({ icon: "error", title: errMsg });
+      if (errData?.email) {
+        errMsg = "Girdiğiniz e-posta adresi başka bir hesaba tanımlı. Lütfen kendinize ait farklı bir adres deneyin.";
+      } else if (errData?.username) {
+        errMsg = "Bu kullanıcı adı alınmış. Lütfen başka bir tane seçin.";
+      } else if (errData?.phone) {
+        errMsg = "Bu telefon numarası zaten sistemde kayıtlı. Lütfen size ait olan doğru numarayı girin.";
+      } else if (errData) {
+        errMsg = Object.values(errData).flat().join(" ");
+      }
+
+      toast.fire({ icon: "warning", title: errMsg });
     }
   };
 
   const handlePasswordSubmit = async (e) => {
     e.preventDefault();
+
+    if (passwordData.old_password === passwordData.new_password) {
+      return toast.fire({ icon: "warning", title: "Yeni şifreniz mevcut şifrenizle aynı olamaz. Lütfen farklı bir şifre belirleyin." });
+    }
+
+    // 🎯 YENİ: Frontend Şifre Zayıflık ve Eşleşme Kontrolleri
+    if (passwordData.new_password !== passwordData.confirm_password) {
+      return toast.fire({ icon: "error", title: "Girdiğiniz yeni şifreler birbiriyle uyuşmuyor." });
+    }
+    if (passwordData.new_password.length < 8) {
+      return toast.fire({ icon: "warning", title: "Yeni şifreniz çok kısa. Güvenliğiniz için en az 8 karakterli bir şifre belirleyin." });
+    }
+    if (!/\d/.test(passwordData.new_password) || !/[a-zA-Z]/.test(passwordData.new_password)) {
+      return toast.fire({
+        icon: "warning",
+        title: "Yeni şifreniz çok zayıf. Lütfen içinde hem harf hem de rakam bulunan daha güçlü bir şifre belirleyin.",
+      });
+    }
+
     try {
       const response = await authApi.changePassword(passwordData);
       toast.fire({ icon: "success", title: response.message || "Şifreniz başarıyla güncellendi." });
@@ -115,8 +143,12 @@ const Profile = () => {
     } catch (error) {
       const errData = error.response?.data;
       let errMsg = "Şifre güncellenemedi.";
+
+      // Hataları düzgün okuma
       if (errData?.old_password) errMsg = errData.old_password[0];
-      else if (errData?.confirm_password) errMsg = errData.confirm_password;
+      else if (errData?.new_password) errMsg = errData.new_password[0] || errData.new_password;
+      else if (errData?.confirm_password) errMsg = errData.confirm_password[0] || errData.confirm_password;
+      else if (errData?.error) errMsg = errData.error;
 
       toast.fire({ icon: "error", title: errMsg });
     }
