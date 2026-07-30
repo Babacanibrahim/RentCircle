@@ -27,7 +27,7 @@ from .serializers import RegisterSerializer, UserProfileSerializer, ChangePasswo
 from .models import CustomUser, PasswordResetOTP, Wallet, WalletTransaction, WithdrawalRequest
 
 class ForgotPasswordRequestView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         method = request.data.get('method')
@@ -91,7 +91,7 @@ class ForgotPasswordRequestView(APIView):
 
 
 class VerifyOTPView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         identifier = request.data.get('identifier', '').strip().lstrip('@')
@@ -109,7 +109,7 @@ class VerifyOTPView(APIView):
 
 
 class ResetPasswordConfirmView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         identifier = request.data.get('identifier', '').strip().lstrip('@')
@@ -119,6 +119,13 @@ class ResetPasswordConfirmView(APIView):
 
         if new_password != confirm_password:
             return Response({"error": "Yeni şifreler birbiriyle uyuşmuyor."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 🎯 YENİ: Şifremi Unuttum kısmında zayıf şifre kontrolü
+        if len(new_password) < 8:
+            return Response({"error": "Şifreniz çok kısa. Güvenliğiniz için en az 8 karakterli bir şifre belirleyin."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not any(char.isdigit() for char in new_password) or not any(char.isalpha() for char in new_password):
+            return Response({"error": "Şifreniz çok zayıf. Lütfen içinde hem harf hem de rakam bulunan daha güçlü bir şifre belirleyin."}, status=status.HTTP_400_BAD_REQUEST)
 
         user = CustomUser.objects.filter(models.Q(email=identifier) | models.Q(username=identifier)).first()
         if not user or not hasattr(user, 'reset_otp'):
@@ -136,6 +143,7 @@ class ResetPasswordConfirmView(APIView):
 
 
 class RegisterView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():

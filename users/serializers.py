@@ -32,7 +32,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'phone', 'city', 'district', 'occupation', 'show_name']
-
         read_only_fields = ['id'] 
         
     def validate_email(self, value):
@@ -45,6 +44,15 @@ class UserProfileSerializer(serializers.ModelSerializer):
         user = self.context['request'].user
         if User.objects.exclude(pk=user.pk).filter(username=value).exists():
             raise serializers.ValidationError("Bu kullanıcı adı alınmış, lütfen başka bir tane seçin.")
+        return value
+
+    # 🎯 YENİ: Profil güncellenirken telefon numarası başkasında var mı kontrolü
+    def validate_phone(self, value):
+        if not value:
+            return value
+        user = self.context['request'].user
+        if User.objects.exclude(pk=user.pk).filter(phone=value).exists():
+            raise serializers.ValidationError("Bu telefon numarası zaten sistemde kayıtlı. Lütfen size ait olan numarayı girin.")
         return value
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -61,6 +69,18 @@ class ChangePasswordSerializer(serializers.Serializer):
     def validate(self, data):
         if data['new_password'] != data['confirm_password']:
             raise serializers.ValidationError({"confirm_password": "Yeni şifreler birbiriyle eşleşmiyor."})
+
+        if data['old_password'] == data['new_password']:
+            raise serializers.ValidationError({"new_password": "Yeni şifreniz mevcut şifrenizle aynı olamaz. Lütfen farklı bir şifre belirleyin."})
+
+        # 🎯 YENİ: Şifre Değiştirirken Zayıf Şifre Kontrolü
+        password = data['new_password']
+        if len(password) < 8:
+            raise serializers.ValidationError({"new_password": "Şifreniz çok kısa. Güvenliğiniz için en az 8 karakterli bir şifre belirleyin."})
+        
+        if not any(char.isdigit() for char in password) or not any(char.isalpha() for char in password):
+            raise serializers.ValidationError({"new_password": "Şifreniz çok zayıf. Lütfen içinde hem harf hem de rakam bulunan daha güçlü bir şifre belirleyin."})
+        
         return data
 
 
@@ -86,7 +106,14 @@ class RegisterSerializer(serializers.ModelSerializer):
         # 1. Şifre uyuşmazlık kontrolü
         if data['password'] != data['confirm_password']:
             raise serializers.ValidationError({"password": "Şifreler birbiriyle uyuşmuyor."})
+
+        password = data['password']
+        if len(password) < 8:
+            raise serializers.ValidationError({"password": "Şifreniz çok kısa. Güvenliğiniz için en az 8 karakterli bir şifre belirleyin."})
         
+        if not any(char.isdigit() for char in password) or not any(char.isalpha() for char in password):
+            raise serializers.ValidationError({"password": "Şifreniz çok zayıf. Lütfen içinde hem harf hem de rakam bulunan daha güçlü bir şifre belirleyin."})
+    
         # 2. 18 Yaş Sınırı Kontrolü (Siber Güvenlik Katmanı)
         dob = data.get('date_of_birth')
         if dob:

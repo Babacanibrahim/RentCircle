@@ -1,7 +1,7 @@
 from rest_framework import viewsets, permissions, status, filters, serializers
 from rest_framework.decorators import APIView, action, api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser, IsAuthenticatedOrReadOnly
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, Sum
 from django.core.cache import cache
@@ -172,7 +172,7 @@ class ItemViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve', 'store_detail']:
+        if self.action in ['list', 'retrieve', 'store_detail']: # store_detail buraya eklendi
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
@@ -723,7 +723,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
 class ReviewViewSet(viewsets.ModelViewSet):
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def perform_create(self, serializer):
         booking = serializer.validated_data['booking']
