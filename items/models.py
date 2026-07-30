@@ -43,7 +43,8 @@ class Item(models.Model):
     
     is_available = models.BooleanField(default=True)
     is_banned = models.BooleanField(default=False)
-    banned_until = models.DateTimeField(null=True, blank=True)
+    banned_until = models.DateTimeField(null=True, blank=True, help_text="İlanın banının açılacağı tarih.")
+    ban_reason = models.TextField(null=True, blank=True, help_text="Satıcıya gösterilecek ilanın kaldırılma/banlanma sebebi.")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -156,7 +157,7 @@ class ItemImage(models.Model):
 
 class Conversation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    item = models.ForeignKey('Item', on_delete=models.CASCADE, related_name='conversations')
+    item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name='conversations', null=True, blank=True)
     renter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='renter_conversations')
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owner_conversations')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -335,3 +336,72 @@ def log_wallet_transaction(sender, instance, created, **kwargs):
             action_type=action, 
             description=f"Cüzdan İşlemi: ₺{instance.amount} ({instance.get_transaction_type_display()})"
         )
+
+class Report(models.Model):
+    REPORT_TARGET_CHOICES = (
+        ('item', 'İlan Şikayeti'),
+        ('user', 'Kullanıcı Şikayeti'),
+    )
+    STATUS_CHOICES = (
+        ('pending', 'İnceleniyor (Açık)'),
+        ('resolved', 'Çözüldü (İşlem Yapıldı)'),
+        ('dismissed', 'Kapatıldı (Asılsız/Red)'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='submitted_reports')
+    
+    target_type = models.CharField(max_length=10, choices=REPORT_TARGET_CHOICES)
+    reported_item = models.ForeignKey(Item, on_delete=models.CASCADE, null=True, blank=True, related_name='reports')
+    reported_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='reports_received')
+    
+    reason = models.CharField(max_length=255) # Örn: Sahte ürün, Hakaret, Yanıltıcı Görsel
+    description = models.TextField(blank=True, null=True)
+    
+    proof_image = models.ImageField(upload_to='reports/proofs/', null=True, blank=True, help_text="Kullanıcının şikayetine eklediği kanıt görseli.")
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.reporter.username} -> {self.target_type} şikayeti"
+
+
+class Ticket(models.Model):
+    TICKET_TOPIC_CHOICES = (
+        ('billing', 'Ödeme ve Bakiye İşlemleri'),
+        ('account', 'Hesap ve Profil İşlemleri'),
+        ('item_issue', 'İlan ve Kiralama Sorunları'),
+        ('technical', 'Sistem ve Teknik Sorunlar'),
+        ('other', 'Diğer'),
+    )
+    STATUS_CHOICES = (
+        ('open', 'Açık (Bekliyor)'),
+        ('in_progress', 'İnceleniyor'),
+        ('resolved', 'Çözüldü'),
+        ('closed', 'Kapatıldı'),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='tickets')
+    
+    topic = models.CharField(max_length=20, choices=TICKET_TOPIC_CHOICES)
+    subject = models.CharField(max_length=255, help_text="Kullanıcının yazdığı kısa konu başlığı")
+    description = models.TextField(help_text="Sorunun detaylı açıklaması")
+    
+    # Maksimum 1 görsel eklenebilecek alan
+    attachment = models.ImageField(upload_to='tickets/attachments/', null=True, blank=True, help_text="Kullanıcının sorunuyla ilgili eklediği görsel.")
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Ticket #{str(self.id)[:8]} - {self.user.username} ({self.get_topic_display()})"

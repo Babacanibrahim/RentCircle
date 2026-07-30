@@ -19,6 +19,9 @@ class CustomUser(AbstractUser):
     district = models.CharField(max_length=100, blank=True, null=True)
     occupation = models.CharField(max_length=150, blank=True, null=True)
     is_active = models.BooleanField(default=False)
+
+    banned_until = models.DateTimeField(null=True, blank=True, help_text="Kullanıcının banının açılacağı tarih. Süresiz ban için çok ileri bir tarih verilebilir.")
+    ban_reason = models.TextField(null=True, blank=True, help_text="Kullanıcıya gösterilecek banlanma sebebi/mesajı.")
     
     trust_score = models.FloatField(default=5.0)
 

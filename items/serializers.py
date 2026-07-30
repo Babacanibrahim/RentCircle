@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, Item, Booking, ItemImage, Conversation, Message, BookingImage, Review, Notification, ActivityLog
+from .models import Category, Item, Booking, ItemImage, Conversation, Message, BookingImage, Review, Notification, ActivityLog, Report, Ticket
 from users.models import WithdrawalRequest
 from django.contrib.auth import get_user_model
 from django.db.models import Max, Avg
@@ -15,6 +15,36 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = '__all__'
+
+
+class ReportSerializer(serializers.ModelSerializer):
+    reporter_name = serializers.CharField(source='reporter.first_name', read_only=True)
+    reporter_username = serializers.CharField(source='reporter.username', read_only=True)
+    reported_username = serializers.CharField(source='reported_user.username', read_only=True, default="-")
+    reported_item_title = serializers.CharField(source='reported_item.title', read_only=True, default="-")
+    created_at_formatted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Report
+        # YENİ: 'proof_image' eklendi
+        fields = ['id', 'reporter_name', 'reporter_username', 'target_type', 'reported_user', 'reported_username', 'reported_item', 'reported_item_title', 'reason', 'description', 'proof_image', 'status', 'created_at_formatted']
+
+    def get_created_at_formatted(self, obj):
+        return obj.created_at.strftime("%d.%m.%Y %H:%M")
+
+
+class TicketSerializer(serializers.ModelSerializer):
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+    created_at_formatted = serializers.SerializerMethodField()
+    topic_display = serializers.CharField(source='get_topic_display', read_only=True)
+
+    class Meta:
+        model = Ticket
+        fields = ['id', 'user_username', 'user_email', 'topic', 'topic_display', 'subject', 'description', 'attachment', 'status', 'created_at_formatted']
+
+    def get_created_at_formatted(self, obj):
+        return obj.created_at.strftime("%d.%m.%Y %H:%M")
 
 
 class CategorySerializer(serializers.ModelSerializer):

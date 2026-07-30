@@ -31,7 +31,7 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone', 'city', 'district', 'occupation', 'show_name']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'phone', 'city', 'district', 'occupation', 'show_name']
 
         read_only_fields = ['id'] 
         

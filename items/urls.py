@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CategoryViewSet, ItemViewSet, BookingViewSet, ConversationViewSet, ReviewViewSet, 
     notification_list, notification_delete, PayWithWalletView, notification_clear_all,
-    AdminDashboardViewSet, WalletViewSet  # 🎯 WalletViewSet buraya eklendi!
+    AdminDashboardViewSet, WalletViewSet, ReportViewSet, TicketViewSet
 )
 
 router = DefaultRouter()
@@ -14,6 +14,8 @@ router.register(r'conversations', ConversationViewSet, basename='conversation')
 router.register(r'reviews', ReviewViewSet, basename='review')
 router.register(r'admin-dashboard', AdminDashboardViewSet, basename='admin-dashboard')
 router.register(r'wallet', WalletViewSet, basename='wallet')
+router.register(r'reports', ReportViewSet, basename='report')
+router.register(r'tickets', TicketViewSet, basename='ticket')
 
 urlpatterns = [
     # Mağaza detay rotasını router'dan önceye alarak ezilmesini engelliyoruz

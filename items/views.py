@@ -1,43 +1,127 @@
-from rest_framework import viewsets, permissions, status, serializers, filters
+from rest_framework import viewsets, permissions, status, filters, serializers
 from rest_framework.decorators import APIView, action, api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny , IsAdminUser
-from django.shortcuts import get_object_or_404, redirect
-from django.db.models import Q, Sum, Count
-import json
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from django.shortcuts import get_object_or_404
+from django.db.models import Q, Sum
 from django.core.cache import cache
 from datetime import datetime, timedelta
-import iyzipay
 from django.utils import timezone
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.utils.text import slugify
 from django.db import transaction
 from decimal import Decimal
-from users.models import Wallet, WalletTransaction, WithdrawalRequest
 from django.contrib.auth import get_user_model
-from .models import Category, Item, Booking, Conversation, Message, ItemImage, BookingImage, Review, Notification, ActivityLog, WalletTransaction
-from .serializers import (CategorySerializer, ItemSerializer, BookingSerializer, StoreDetailSerializer, 
-                          ConversationSerializer, MessageSerializer, ReviewSerializer, NotificationSerializer,
-                          ActivityLogSerializer, WithdrawalRequestSerializer)
+
+# Kendi app isimlerine göre importları kontrol et
+from users.models import Wallet, WalletTransaction, WithdrawalRequest
+from .models import (Category, Item, Booking, Conversation, Message, ItemImage, 
+                     BookingImage, Review, Notification, ActivityLog, Report, Ticket)
+from .serializers import (CategorySerializer, ItemSerializer, BookingSerializer, 
+                          StoreDetailSerializer, ConversationSerializer, MessageSerializer, 
+                          ReviewSerializer, NotificationSerializer, ActivityLogSerializer, 
+                          WithdrawalRequestSerializer, ReportSerializer, TicketSerializer)
 
 User = get_user_model()
 
-class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Category.objects.all()
+
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all().order_by('name')
     serializer_class = CategorySerializer
-    permission_classes = [permissions.AllowAny]
+    
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [permissions.AllowAny()]
+        return [permissions.IsAdminUser()]
+
+    def perform_create(self, serializer):
+        name = serializer.validated_data.get('name')
+        slug = slugify(name)
+        serializer.save(slug=slug)
+
+    def perform_update(self, serializer):
+        name = serializer.validated_data.get('name')
+        if name:
+            slug = slugify(name)
+            serializer.save(slug=slug)
+        else:
+            serializer.save()
+
+
+class TicketViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = TicketSerializer
+    parser_classes = (MultiPartParser, FormParser) # Görsel yükleme desteği
+
+    def get_queryset(self):
+        # 🎯 ÇÖZÜM: Yönetici (Admin) ise tüm biletleri görsün, değilse sadece kendininkileri
+        if self.request.user.is_staff:
+            return Ticket.objects.all().order_by('-created_at')
+        return Ticket.objects.filter(user=self.request.user).order_by('-created_at')
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class ReportViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+    parser_classes = (MultiPartParser, FormParser)
+
+    @action(detail=False, methods=['post'])
+    def submit(self, request):
+        target_type = request.data.get('target_type')
+        reason = request.data.get('reason')
+        description = request.data.get('description', '')
+        proof_image = request.FILES.get('proof_image')
+
+        if target_type not in ['item', 'user'] or not reason:
+            return Response({"error": "Eksik bilgi gönderildi."}, status=status.HTTP_400_BAD_REQUEST)
+
+        report = Report(
+            reporter=request.user,
+            target_type=target_type,
+            reason=reason,
+            description=description,
+            proof_image=proof_image
+        )
+        
+        try:
+            if target_type == 'item':
+                item_id = request.data.get('item_id')
+                if item_id and str(item_id) != "undefined" and str(item_id) != "null":
+                    # ID yerine objenin kendisini çekip atıyoruz
+                    item = Item.objects.get(id=item_id)
+                    report.reported_item = item
+            elif target_type == 'user':
+                user_id = request.data.get('user_id')
+                if user_id and str(user_id) != "undefined" and str(user_id) != "null":
+                    target_user = User.objects.get(id=user_id)
+                    report.reported_user = target_user
+                    
+            report.save()
+            return Response({"message": "Şikayetiniz alınmıştır."}, status=status.HTTP_201_CREATED)
+            
+        except Item.DoesNotExist:
+            return Response({"error": "Şikayet edilmek istenen ilan bulunamadı."}, status=status.HTTP_404_NOT_FOUND)
+        except User.DoesNotExist:
+            return Response({"error": "Şikayet edilmek istenen kullanıcı bulunamadı."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            # Sistem çökmek yerine hatayı frontend'e düzgünce fırlatacak
+            return Response({"error": f"Bir hata oluştu: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ItemViewSet(viewsets.ModelViewSet):
     serializer_class = ItemSerializer
-
     filter_backends = [filters.SearchFilter]
     search_fields = ['title', 'description', 'category__name']
 
     def get_queryset(self):
-        # 1. Süresi dolan banları kaldır
+        # 1. Süresi dolan banları kaldır (Otomatik Ban Açıcı)
         expired_bans = Item.objects.filter(is_banned=True, banned_until__lte=timezone.now())
         for item in expired_bans:
             item.is_banned = False
             item.banned_until = None
+            item.ban_reason = None
             item.is_available = True
             item.save()
 
@@ -45,10 +129,7 @@ class ItemViewSet(viewsets.ModelViewSet):
         queryset = Item.objects.all().prefetch_related('images').order_by("-created_at")
 
         if self.action == 'list':
-            # Sadece aktif ve banlanmamış olanları getir
             queryset = queryset.filter(is_available=True, is_banned=False)
-            
-            # 🎯 URL'den gelen Şehir ve İlçe filtrelerini uygula
             city = self.request.query_params.get('city', None)
             district = self.request.query_params.get('district', None)
             
@@ -142,11 +223,8 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        # 🎯 ÇÖZÜM BURADA: Eğer giren kişi YÖNETİCİ ise TÜM işlemleri görebilsin!
         if user.is_staff:
             return Booking.objects.all().order_by('-created_at')
-            
-        # Yönetici değilse, sadece taraf olduğu işlemleri görsün
         return Booking.objects.filter(Q(renter=user) | Q(item__owner=user)).order_by('-created_at')
 
     def perform_create(self, serializer):
@@ -186,13 +264,9 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response({"message": "Onaylandı. Kira bedeli cüzdanınıza eklendi."}, status=status.HTTP_200_OK)
 
-    # -----------------------------------------------------------
-    # 1. KİRACI: Ürünü Teslim Alırken PIN, Fotoğraf ve Not Ekler
-    # -----------------------------------------------------------
     @action(detail=True, methods=['post'])
     def handover(self, request, pk=None):
         booking = self.get_object()
-        
         if request.user != booking.renter:
             return Response({'error': 'Sadece kiracı teslim alma işlemini başlatabilir.'}, status=status.HTTP_403_FORBIDDEN)
             
@@ -202,10 +276,8 @@ class BookingViewSet(viewsets.ModelViewSet):
         
         if booking.status != 'approved':
             return Response({'error': 'Bu işlem teslimat için uygun değil.'}, status=status.HTTP_400_BAD_REQUEST)
-            
         if booking.handover_pin != pin:
             return Response({'error': 'Geçersiz Satıcı PIN kodu.'}, status=status.HTTP_400_BAD_REQUEST)
-            
         if not images:
             return Response({'error': 'Güvenlik protokolü gereği en az 1 adet durum fotoğrafı yüklemelisiniz.'}, status=status.HTTP_400_BAD_REQUEST)
             
@@ -226,16 +298,11 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
         return Response({'message': 'Teslimat kanıtları yüklendi, satıcının onayı bekleniyor.'})
 
-    # -----------------------------------------------------------
-    # 2. SATICI: Kiracının Teslim Aldığını Onaylar (Kiralama Başlar)
-    # -----------------------------------------------------------
     @action(detail=True, methods=['post'])
     def approve_handover(self, request, pk=None):
         booking = self.get_object()
-        
         if request.user != booking.item.owner:
             return Response({'error': 'Sadece satıcı teslimatı onaylayabilir.'}, status=status.HTTP_403_FORBIDDEN)
-            
         if booking.status != 'handover_pending':
             return Response({'error': 'Geçersiz işlem.'}, status=status.HTTP_400_BAD_REQUEST)
             
@@ -250,13 +317,9 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
         return Response({'message': 'Teslimat onaylandı, kiralama aktif duruma geçti.'})
 
-    # -----------------------------------------------------------
-    # 3. SATICI: Ürünü İade Alırken PIN, Fotoğraf ve Not Ekler
-    # -----------------------------------------------------------
     @action(detail=True, methods=['post'])
     def complete_booking(self, request, pk=None):
         booking = self.get_object()
-        
         if request.user != booking.item.owner:
             return Response({'error': 'Sadece satıcı iade alma işlemini başlatabilir.'}, status=status.HTTP_403_FORBIDDEN)
             
@@ -266,10 +329,8 @@ class BookingViewSet(viewsets.ModelViewSet):
         
         if booking.status != 'active':
             return Response({'error': 'Bu işlem şu anda aktif değil.'}, status=status.HTTP_400_BAD_REQUEST)
-            
         if booking.return_pin != pin:
             return Response({'error': 'Geçersiz Kiracı PIN kodu.'}, status=status.HTTP_400_BAD_REQUEST)
-            
         if not images:
             return Response({'error': 'Güvenlik protokolü gereği en az 1 adet iade durumu fotoğrafı yüklemelisiniz.'}, status=status.HTTP_400_BAD_REQUEST)
             
@@ -288,16 +349,11 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
         return Response({'message': 'İade kanıtları yüklendi, kiracının onayı bekleniyor.'})
 
-    # -----------------------------------------------------------
-    # 4. KİRACI: İadeyi Onaylar (İşlem Biter, Depozito İade Olur)
-    # -----------------------------------------------------------
     @action(detail=True, methods=['post'])
     def approve_return(self, request, pk=None):
         booking = self.get_object()
-        
         if request.user != booking.renter:
             return Response({'error': 'Sadece kiracı iade işlemini onaylayabilir.'}, status=status.HTTP_403_FORBIDDEN)
-            
         if booking.status != 'return_pending':
             return Response({'error': 'Geçersiz işlem.'}, status=status.HTTP_400_BAD_REQUEST)
             
@@ -307,7 +363,6 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking.item.save()
             booking.save()
             
-            # 🎯 1. ADIM: DEPOZİTO (GÜVENCE BEDELİ) İADESİ
             if booking.deposit_price > 0:
                 renter_wallet, _ = Wallet.objects.get_or_create(user=booking.renter)
                 renter_wallet.balance += Decimal(str(booking.deposit_price))
@@ -320,7 +375,6 @@ class BookingViewSet(viewsets.ModelViewSet):
                     description=f"'{booking.item.title}' sorunsuz iade edildi. Güvence bedeli (Depozito) iadesi."
                 )
             
-            # Satıcıya bildirim
             Notification.objects.create(
                 user=booking.item.owner,
                 notification_type='booking',
@@ -328,7 +382,6 @@ class BookingViewSet(viewsets.ModelViewSet):
                 message=f"Kiracı iadeyi onayladı. Kiralama işlemi sorunsuz tamamlandı! Şimdi birbirinizi değerlendirebilirsiniz."
             )
             
-            # Kiracıya cüzdan bildirimi
             Notification.objects.create(
                 user=booking.renter,
                 notification_type='wallet',
@@ -338,13 +391,10 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response({'message': 'İade onaylandı, kiralama işlemi başarıyla tamamlandı ve depozitonuz iade edildi.'})
 
-    # -----------------------------------------------------------
-    # ADIM 2: YÖNETİCİ ANLAŞMAZLIK ÇÖZÜMÜ (Resolve Dispute)
-    # -----------------------------------------------------------
     @action(detail=True, methods=['post'], permission_classes=[IsAdminUser])
     def resolve_dispute(self, request, pk=None):
         booking = self.get_object()
-        winner = request.data.get('winner') # 'owner' veya 'renter' göndereceğiz
+        winner = request.data.get('winner')
         resolution_note = request.data.get('resolution_note', '')
 
         if booking.status != 'disputed':
@@ -357,30 +407,24 @@ class BookingViewSet(viewsets.ModelViewSet):
             deposit = Decimal(str(booking.deposit_price))
             
             if winner == 'owner':
-                # 🎯 SATICI HAKLI: Depozito Satıcıya Aktarılır
                 wallet, _ = Wallet.objects.get_or_create(user=booking.item.owner)
                 wallet.balance += deposit
                 wallet.save()
                 WalletTransaction.objects.create(
-                    wallet=wallet,
-                    transaction_type='INCOME',
-                    amount=deposit,
+                    wallet=wallet, transaction_type='INCOME', amount=deposit,
                     description=f"'{booking.item.title}' anlaşmazlık çözümü: Haklı bulunduğunuz için depozito bedeli size aktarıldı."
                 )
                 booking.dispute_winner = 'owner'
                 
-                Notification.objects.create(user=booking.item.owner, notification_type='wallet', reference_id=str(booking.id), message=f"Anlaşmazlık lehinize sonuçlandı. ₺{deposit} tazminat (depozito) cüzdanınıza eklendi. Not: {resolution_note}")
-                Notification.objects.create(user=booking.renter, notification_type='system', reference_id=str(booking.id), message=f"Anlaşmazlık aleyhinize sonuçlandı. Hasar/Sorun tespit edildiği için depozitonuz satıcıya aktarıldı. Not: {resolution_note}")
+                Notification.objects.create(user=booking.item.owner, notification_type='wallet', reference_id=str(booking.id), message=f"Anlaşmazlık lehinize sonuçlandı. ₺{deposit} tazminat cüzdanınıza eklendi. Not: {resolution_note}")
+                Notification.objects.create(user=booking.renter, notification_type='system', reference_id=str(booking.id), message=f"Anlaşmazlık aleyhinize sonuçlandı. Hasar tespiti nedeni ile depozitonuz satıcıya aktarıldı. Not: {resolution_note}")
 
             elif winner == 'renter':
-                # 🎯 KİRACI HAKLI: Depozito Kiracıya Geri İade Edilir
                 wallet, _ = Wallet.objects.get_or_create(user=booking.renter)
                 wallet.balance += deposit
                 wallet.save()
                 WalletTransaction.objects.create(
-                    wallet=wallet,
-                    transaction_type='REFUND',
-                    amount=deposit,
+                    wallet=wallet, transaction_type='REFUND', amount=deposit,
                     description=f"'{booking.item.title}' anlaşmazlık çözümü: Haklı bulunduğunuz için depozito bedeli iade edildi."
                 )
                 booking.dispute_winner = 'renter'
@@ -388,7 +432,6 @@ class BookingViewSet(viewsets.ModelViewSet):
                 Notification.objects.create(user=booking.renter, notification_type='wallet', reference_id=str(booking.id), message=f"Anlaşmazlık lehinize sonuçlandı. ₺{deposit} depozito iade edildi. Not: {resolution_note}")
                 Notification.objects.create(user=booking.item.owner, notification_type='system', reference_id=str(booking.id), message=f"Anlaşmazlık aleyhinize sonuçlandı. Şikayetiniz haksız bulunduğu için depozito kiracıya iade edildi. Not: {resolution_note}")
 
-            # İşlemi Kapat
             booking.status = 'completed'
             booking.item.is_available = True
             booking.item.save()
@@ -396,9 +439,6 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response({'message': f"Anlaşmazlık başarıyla çözüldü. Kazanan taraf: {'Satıcı' if winner == 'owner' else 'Kiracı'}."})
 
-    # -----------------------------------------------------------
-    # 5. ORTAK: Taraflardan Biri İtiraz Ederse (Dispute)
-    # -----------------------------------------------------------
     @action(detail=True, methods=['post'])
     def raise_dispute(self, request, pk=None):
         booking = self.get_object()
@@ -422,9 +462,9 @@ class BookingViewSet(viewsets.ModelViewSet):
             user=other_user,
             notification_type='system',
             reference_id=str(booking.id),
-            message=f"DİKKAT: Kiralama işleminde karşı taraf bir uyuşmazlık (itiraz) bildirdi. Yönetim ekibi incelemeye aldı."
+            message=f"DİKKAT: Kiralama işleminde karşı taraf bir uyuşmazlık bildirdi. Yönetim ekibi incelemeye aldı."
         )
-        return Response({'message': 'İtirazınız sisteme kaydedildi. Yöneticilerimiz kanıtları inceleyerek karar verecektir.'})
+        return Response({'message': 'İtirazınız sisteme kaydedildi. Yöneticilerimiz inceleyerek karar verecektir.'})
 
 
     @action(detail=True, methods=['post'])
@@ -468,14 +508,14 @@ class BookingViewSet(viewsets.ModelViewSet):
                 item.save()
                 
                 owner = item.owner
-                owner.trust_score = max(1.0, owner.trust_score - 0.5) 
+                owner.trust_score = max(1.0, getattr(owner, 'trust_score', 5.0) - 0.5) 
                 owner.save()
                 
                 Notification.objects.create(
                     user=owner,
                     notification_type='system',
                     reference_id=str(booking.id),
-                    message=f"🚨 CEZA: '{item.title}' kiralama işlemini son 24 saat içinde iptal ettiğiniz için ilanınız 1 hafta ({item.banned_until.strftime('%d.%m.%Y')}) süreyle askıya alınmış ve puanınız düşürülmüştür."
+                    message=f"🚨 CEZA: '{item.title}' işlemini son 24 saat içinde iptal ettiğiniz için ilanınız askıya alınmış ve puanınız düşürülmüştür."
                 )
 
             if booking.status == 'approved':
@@ -486,9 +526,9 @@ class BookingViewSet(viewsets.ModelViewSet):
                 
                 owner_desc = f"'{booking.item.title}' iptal (Geri alım)."
                 if penalty_amount > 0:
-                    owner_desc = f"'{booking.item.title}' kiracı son 24 saatte iptal ettiği için {penalty_amount} ₺ ceza cüzdanınızda teselli geliri olarak bırakıldı."
+                    owner_desc = f"'{booking.item.title}' kiracı iptali: {penalty_amount} ₺ ceza teselli geliri eklendi."
                 elif user == booking.item.owner:
-                    owner_desc = f"'{booking.item.title}' işlemini iptal ettiniz. Kiralama bedeli iade edilmek üzere cüzdanınızdan düşüldü."
+                    owner_desc = f"'{booking.item.title}' işlemini iptal ettiniz. Bedel düşüldü."
 
                 WalletTransaction.objects.create(wallet=owner_wallet, transaction_type='PAYMENT', amount=amount_to_deduct, description=owner_desc)
 
@@ -502,17 +542,16 @@ class BookingViewSet(viewsets.ModelViewSet):
                 
                 renter_desc = f"'{booking.item.title}' iptal iadesi."
                 if penalty_amount > 0:
-                    renter_desc = f"'{booking.item.title}' kiralamasını son 24 saat içinde iptal ettiğiniz için {penalty_amount} ₺ ceza kesilerek kalan tutar iade edildi."
+                    renter_desc = f"'{booking.item.title}' iptal cezası (-{penalty_amount} ₺) sonrası iade."
                 elif user == booking.item.owner:
-                    renter_desc = f"'{booking.item.title}' satıcı tarafından iptal edildi. Paranızın tamamı kesintisiz iade edildi."
+                    renter_desc = f"'{booking.item.title}' satıcı iptali: Kesintisiz iade."
 
                 WalletTransaction.objects.create(wallet=renter_wallet, transaction_type='REFUND', amount=refund_amount, description=renter_desc)
 
                 if user == booking.item.owner:
-                    Notification.objects.create(user=booking.renter, sender=user, item=booking.item, notification_type='system', reference_id=str(booking.id), message=f"Satıcı '{booking.item.title}' ({date_str}) işlemini iptal etti. Tutarınız cüzdanınıza iade edildi.")
+                    Notification.objects.create(user=booking.renter, sender=user, item=booking.item, notification_type='system', reference_id=str(booking.id), message=f"Satıcı '{booking.item.title}' ({date_str}) işlemini iptal etti. İade yapıldı.")
 
             booking.status = 'rejected'
-            
             if not booking.item.is_banned:
                 booking.item.is_available = True
                 booking.item.save()
@@ -535,16 +574,22 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         item_id = request.data.get('item')
-        existing_conv = Conversation.objects.filter(item_id=item_id, renter=request.user).first()
-        if existing_conv:
-            serializer = self.get_serializer(existing_conv, context={'request': request})
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
+        if item_id:
+            existing_conv = Conversation.objects.filter(item_id=item_id, renter=request.user).first()
+            if existing_conv:
+                serializer = self.get_serializer(existing_conv, context={'request': request})
+                return Response(serializer.data, status=status.HTTP_200_OK)
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        item = get_object_or_404(Item, id=self.request.data.get('item'))
-        serializer.save(renter=self.request.user, owner=item.owner)
+        item_id = self.request.data.get('item')
+        if item_id:
+            item = get_object_or_404(Item, id=item_id)
+            serializer.save(renter=self.request.user, owner=item.owner)
+        else:
+            # Sadece ticket mesajlaşması ise owner olarak RentCircle Desteği ata
+            system_user, _ = User.objects.get_or_create(username='rentcircle_destek', defaults={'first_name': 'RentCircle', 'last_name': 'Destek', 'is_staff': True})
+            serializer.save(renter=self.request.user, owner=system_user)
 
     @action(detail=True, methods=['get'])
     def messages(self, request, pk=None):
@@ -674,6 +719,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
         return Response({"message": "İşlem başarıyla gerçekleşti.", "offer_status": message.offer_status}, status=status.HTTP_200_OK)
     
+
 class ReviewViewSet(viewsets.ModelViewSet):
     queryset = Review.objects.all()
     serializer_class = ReviewSerializer
@@ -730,7 +776,6 @@ class PayWithWalletView(APIView):
         renter = request.user
         start_date_str = request.data.get('start_date')
         end_date_str = request.data.get('end_date')
-        
         base_price_raw = request.data.get('total_price')
 
         if not all([start_date_str, end_date_str, base_price_raw]):
@@ -801,7 +846,6 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
-        """Platformun genel finansal ve operasyonel istatistiklerini getirir"""
         pool_balance = Booking.objects.filter(
             status__in=['pending_approval', 'approved', 'handover_pending', 'return_pending', 'active', 'disputed']
         ).aggregate(total_rent=Sum('total_price'), total_deposit=Sum('deposit_price'))
@@ -821,7 +865,6 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def users_list(self, request):
-        """Tüm kullanıcıları Cüzdanlarıyla beraber (Tek Sorguda) getirir"""
         search = request.query_params.get('search', '').lower()
         users = User.objects.select_related('wallet').all().order_by('-date_joined')
         
@@ -844,81 +887,203 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'])
     def update_user(self, request):
-        """Kullanıcının verilerini günceller"""
         target_user = get_object_or_404(User, id=request.data.get('user_id'))
-        
         if target_user == request.user and request.data.get('is_staff') is False:
             return Response({"error": "Sistem Koruması: Kendi yöneticilik yetkinizi alamazsınız."}, status=status.HTTP_400_BAD_REQUEST)
             
         target_user.is_staff = request.data.get('is_staff', target_user.is_staff)
         target_user.trust_score = request.data.get('trust_score', getattr(target_user, 'trust_score', 5.0))
         target_user.save()
-        
-        if 'wallet_balance' in request.data:
-            wallet, _ = Wallet.objects.get_or_create(user=target_user)
-            wallet.balance = request.data.get('wallet_balance')
-            wallet.save()
-            
         return Response({"message": "Kullanıcı başarıyla güncellendi."})
+
+    # ========================================================
+    # 🎯 YENİ 1: CÜZDAN BAKİYESİ EKLE / ÇIKAR (DEKONT MANTIĞI)
+    # ========================================================
+    @action(detail=False, methods=['post'])
+    def manage_wallet(self, request):
+        user_id = request.data.get('user_id')
+        action_type = request.data.get('action') 
+        amount = Decimal(str(request.data.get('amount', 0)))
+
+        target_user = get_object_or_404(User, id=user_id)
+        wallet, _ = Wallet.objects.get_or_create(user=target_user)
+
+        if action_type == 'add':
+            wallet.balance += amount
+            desc = f"Sistem Yöneticisi tarafından hesabınıza ₺{amount} eklendi."
+            trans_type = 'DEPOSIT'
+        elif action_type == 'subtract':
+            if wallet.balance < amount:
+                return Response({"error": "Kullanıcının bakiyesi yetersiz!"}, status=status.HTTP_400_BAD_REQUEST)
+            wallet.balance -= amount
+            desc = f"Sistem Yöneticisi tarafından hesabınızdan ₺{amount} kesildi."
+            trans_type = 'WITHDRAWAL'
+        else:
+            return Response({"error": "Geçersiz işlem tipi."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        wallet.save()
+        WalletTransaction.objects.create(wallet=wallet, transaction_type=trans_type, amount=amount, description=desc)
+        ActivityLog.objects.create(user=request.user, action_type="SİSTEM FİNANS", description=f"@{target_user.username} kullanıcısına ₺{amount} {action_type} işlemi yapıldı.")
+        Notification.objects.create(user=target_user, notification_type='wallet', message=desc)
+
+        return Response({"message": "Bakiye başarıyla güncellendi.", "new_balance": wallet.balance})
+
+    # ========================================================
+    # 🎯 YENİ 2: SÜRELİ & SÜRESİZ BAN İŞLEMİ (KULLANICI/İLAN)
+    # ========================================================
+    @action(detail=False, methods=['post'])
+    def ban_entity(self, request):
+        target_type = request.data.get('target_type') 
+        entity_id = request.data.get('id')
+        duration = request.data.get('duration') 
+        reason = request.data.get('reason', 'Topluluk kurallarını ihlal ettiniz.')
+
+        banned_until = None
+        if duration == '1_week':
+            banned_until = timezone.now() + timedelta(days=7)
+        elif duration == '1_month':
+            banned_until = timezone.now() + timedelta(days=30)
+        elif duration == 'permanent':
+            banned_until = timezone.now() + timedelta(days=36500) 
+
+        if target_type == 'user':
+            target_user = get_object_or_404(User, id=entity_id)
+            if duration == 'remove_ban':
+                target_user.banned_until = None
+                target_user.ban_reason = None
+                target_user.is_active = True
+                msg = "Hesabınızın kısıtlaması kaldırılmıştır."
+            else:
+                target_user.banned_until = banned_until
+                target_user.ban_reason = reason
+                if duration == 'permanent':
+                    target_user.is_active = False 
+                msg = f"Hesabınız sistem tarafından askıya alınmıştır. Sebep: {reason}"
+
+            target_user.save()
+            ActivityLog.objects.create(user=request.user, action_type="MODERASYON", description=f"@{target_user.username} kullanıcısına {duration} kısıtlaması.")
+            Notification.objects.create(user=target_user, notification_type='system', message=msg)
+            return Response({"message": "Kullanıcı banlandı ve bilgilendirildi."})
+
+        elif target_type == 'item':
+            item = get_object_or_404(Item, id=entity_id)
+            if duration == 'remove_ban':
+                item.banned_until = None
+                item.ban_reason = None
+                item.is_banned = False
+                item.is_available = True
+                msg = f"'{item.title}' ilanınızın kısıtlaması kaldırıldı."
+            else:
+                item.banned_until = banned_until
+                item.ban_reason = reason
+                item.is_banned = True
+                item.is_available = False
+                msg = f"'{item.title}' ilanınız yayından kaldırılmıştır. Sebep: {reason}"
+                
+            item.save()
+            ActivityLog.objects.create(user=request.user, action_type="MODERASYON", description=f"İlan (#{item.id}) {duration} süreyle banlandı.")
+            Notification.objects.create(user=item.owner, notification_type='system', message=msg)
+            return Response({"message": "İlan banlandı ve satıcıya bildirildi."})
+
+    # ========================================================
+    # 🎯 YENİ 3: SİSTEM DESTEK HESABINDAN MESAJ ATMA
+    # ========================================================
+    @action(detail=False, methods=['post'])
+    def reply_to_support(self, request):
+        target_user_id = request.data.get('user_id')
+        message_content = request.data.get('message')
+
+        target_user = get_object_or_404(User, id=target_user_id)
+        system_user, _ = User.objects.get_or_create(username='rentcircle_destek', defaults={'first_name': 'RentCircle', 'last_name': 'Destek', 'is_staff': True})
+
+        conversation, _ = Conversation.objects.get_or_create(renter=target_user, owner=system_user)
+        Message.objects.create(conversation=conversation, sender=system_user, content=message_content)
+
+        ticket_id = request.data.get('ticket_id')
+        if ticket_id:
+            try:
+                ticket = Ticket.objects.get(id=ticket_id)
+                ticket.status = 'in_progress' 
+                ticket.save()
+            except Ticket.DoesNotExist:
+                pass
+
+        return Response({"message": "RentCircle Destek mesajı iletildi."})
 
     @action(detail=False, methods=['get'])
     def items_list(self, request):
-        """Tüm ilanları optimize edilmiş şekilde getirir"""
         search = request.query_params.get('search', '').lower()
         items = Item.objects.select_related('owner', 'category').all().order_by('-created_at')
         if search:
             items = items.filter(Q(title__icontains=search) | Q(owner__username__icontains=search))
-            
         serializer = ItemSerializer(items, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])
     def admin_update_item(self, request):
-        """İlanı zorla günceller"""
         item = get_object_or_404(Item, id=request.data.get('item_id'))
-        
         for field in ['title', 'description', 'price_per_day', 'city', 'is_available']:
             if field in request.data:
                 setattr(item, field, request.data.get(field))
-                
         if 'is_banned' in request.data:
             item.is_banned = request.data.get('is_banned')
             if item.is_banned:
                 item.is_available = False
-                
         item.save()
-        return Response({"message": "İlan başarıyla güncellendi."})
+        return Response({"message": "İlan güncellendi."})
 
     @action(detail=False, methods=['delete'])
     def delete_item(self, request):
         get_object_or_404(Item, id=request.query_params.get('item_id')).delete()
-        return Response({"message": "İlan kalıcı olarak silindi."})
+        return Response({"message": "İlan silindi."})
 
     @action(detail=False, methods=['delete'])
     def delete_user(self, request):
         user = get_object_or_404(User, id=request.query_params.get('user_id'))
         if user == request.user:
-            return Response({"error": "Sistem Koruması: Kendi hesabınızı silemezsiniz."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Kendi hesabınızı silemezsiniz."}, status=status.HTTP_400_BAD_REQUEST)
         user.delete()
-        return Response({"message": "Kullanıcı kalıcı olarak silindi."})
+        return Response({"message": "Kullanıcı silindi."})
+
+    # ========================================================
+    # 🎯 YENİ 4: EKSİK CRUD İŞLEMLERİ (KİRALAMALAR VE YORUMLAR)
+    # ========================================================
+    @action(detail=False, methods=['get'])
+    def bookings_list(self, request):
+        bookings = Booking.objects.select_related('item', 'renter').all().order_by('-created_at')
+        serializer = BookingSerializer(bookings, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['delete'])
+    def delete_booking(self, request):
+        get_object_or_404(Booking, id=request.query_params.get('booking_id')).delete()
+        return Response({"message": "Kiralama işlemi silindi."})
+
+    @action(detail=False, methods=['get'])
+    def reviews_list(self, request):
+        reviews = Review.objects.select_related('reviewer', 'item').all().order_by('-created_at')
+        serializer = ReviewSerializer(reviews, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['delete'])
+    def delete_review(self, request):
+        get_object_or_404(Review, id=request.query_params.get('review_id')).delete()
+        return Response({"message": "Yorum silindi."})
 
     @action(detail=False, methods=['get'])
     def disputed_bookings(self, request):
-        """Çözüm bekleyen anlaşmazlıkları getirir"""
         disputes = Booking.objects.select_related('item', 'renter').filter(status='disputed').order_by('-updated_at')
         serializer = BookingSerializer(disputes, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
     def system_logs(self, request):
-        """Global Terminal Logları (Son 500)"""
         logs = ActivityLog.objects.select_related('user').all()[:500]
         serializer = ActivityLogSerializer(logs, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
     def user_logs(self, request):
-        """Seçili kullanıcının logları"""
         user_id = request.query_params.get('user_id')
         logs = ActivityLog.objects.filter(user_id=user_id).order_by('-created_at')[:200]
         serializer = ActivityLogSerializer(logs, many=True)
@@ -926,14 +1091,12 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def withdrawals_list(self, request):
-        """Para çekme taleplerini getirir"""
         withdrawals = WithdrawalRequest.objects.select_related('wallet__user').all().order_by('-created_at')
         serializer = WithdrawalRequestSerializer(withdrawals, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])
     def handle_withdrawal(self, request):
-        """Para çekme talebini Onayla veya Reddet"""
         withdrawal = get_object_or_404(WithdrawalRequest, id=request.data.get('request_id'))
         action_type = request.data.get('action') 
         reason = request.data.get('reason', '')
@@ -944,31 +1107,46 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         if action_type == 'approve':
             withdrawal.status = 'APPROVED'
             withdrawal.save()
-            Notification.objects.create(user=withdrawal.wallet.user, notification_type='wallet', reference_id=str(withdrawal.id), message=f"₺{withdrawal.amount} tutarındaki para çekme talebiniz onaylandı ve IBAN'ınıza iletildi.")
+            Notification.objects.create(user=withdrawal.wallet.user, notification_type='wallet', reference_id=str(withdrawal.id), message=f"₺{withdrawal.amount} para çekme talebiniz onaylandı ve IBAN'ınıza iletildi.")
         
         elif action_type == 'reject':
             withdrawal.status = 'REJECTED'
             withdrawal.save()
-            
-            # Parayı cüzdana geri iade et
             withdrawal.wallet.balance += withdrawal.amount
             withdrawal.wallet.save()
-            
             WalletTransaction.objects.create(wallet=withdrawal.wallet, transaction_type='REFUND', amount=withdrawal.amount, description=f"Reddedilen Çekim Talebi İadesi. Sebep: {reason}")
             Notification.objects.create(user=withdrawal.wallet.user, notification_type='wallet', reference_id=str(withdrawal.id), message=f"₺{withdrawal.amount} para çekme talebiniz reddedildi. Tutar cüzdanınıza iade edildi. Sebep: {reason}")
             
         return Response({"message": "Para çekme talebi başarıyla işlendi."})
 
+    @action(detail=False, methods=['get'])
+    def reports_list(self, request):
+        reports = Report.objects.select_related('reporter', 'reported_user', 'reported_item').all()
+        serializer = ReportSerializer(reports, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'])
+    def handle_report(self, request):
+        """Basit rapor kapatma/iptal işlemi (Süreli ban işlemi için artık ban_entity kullanılıyor)"""
+        report = get_object_or_404(Report, id=request.data.get('report_id'))
+        action_type = request.data.get('action') 
+        
+        if report.status != 'pending':
+            return Response({"error": "Bu şikayet zaten sonuçlandırılmış."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if action_type == 'dismiss':
+            report.status = 'dismissed' 
+            report.save()
+            return Response({"message": "Şikayet asılsız olarak kapatıldı."})
+        
+        return Response({"error": "Lütfen gelişmiş yasaklama aracıyla işlem yapın."}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class WalletViewSet(viewsets.ViewSet):
-    """
-    Kullanıcıların Cüzdan ve Para Çekme İşlemleri
-    """
     permission_classes = [IsAuthenticated]
 
     @action(detail=False, methods=['post'])
     def request_withdrawal(self, request):
-        """Kullanıcının IBAN'a para çekme talebi oluşturması"""
         amount = Decimal(str(request.data.get('amount', '0')))
         iban = request.data.get('iban', '').strip()
 
@@ -981,16 +1159,10 @@ class WalletViewSet(viewsets.ViewSet):
         if wallet.balance < amount:
             return Response({"error": "Cüzdanınızda yeterli bakiye bulunmuyor."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 1. Parayı cüzdandan düş ve işlemi logla
         wallet.balance -= amount
         wallet.save()
         
-        WalletTransaction.objects.create(
-            wallet=wallet, transaction_type='WITHDRAWAL', amount=amount,
-            description=f"IBAN'a ({iban[-4:]}) para çekme talebi."
-        )
-        
-        # 2. Yönetici (Admin) için Talebi oluştur
+        WalletTransaction.objects.create(wallet=wallet, transaction_type='WITHDRAWAL', amount=amount, description=f"IBAN'a ({iban[-4:]}) para çekme talebi.")
         WithdrawalRequest.objects.create(wallet=wallet, amount=amount, iban=iban)
 
         return Response({"message": "Para çekme talebiniz alındı ve finans birimine iletildi."}, status=status.HTTP_200_OK)
