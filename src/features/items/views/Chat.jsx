@@ -10,6 +10,11 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import axios from "axios";
 
+// 🎯 ÇÖZÜM 7: TAKVİM KISITLAMASI İÇİN İMPORTLAR
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import { parseISO } from "date-fns";
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -90,23 +95,44 @@ const Chat = () => {
   const [offerDates, setOfferDates] = useState({ start_date: "", end_date: "" });
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
 
+  // 🎯 YENİ: Takvim Seçici için State'ler
+  const [dateRange, setDateRange] = useState([null, null]);
+  const [startDate, endDate] = dateRange;
+  const [activeItemDetails, setActiveItemDetails] = useState(null);
+
   useEffect(() => {
     if (!searchQuery.trim()) setSearchResults([]);
   }, [searchQuery]);
 
+  // 🎯 YENİ: Aktif sohbet değiştiğinde, ilanın detaylarını çekip dolu günleri alıyoruz
   useEffect(() => {
-    if (offerDates.start_date && offerDates.end_date && activeChat?.item_price) {
-      const start = new Date(offerDates.start_date);
-      const end = new Date(offerDates.end_date);
-
-      if (end >= start) {
-        const diffTime = Math.abs(end - start);
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-        const calculatedTotal = diffDays * parseFloat(activeChat.item_price);
-        setOfferPrice(calculatedTotal.toString());
-      }
+    if (activeChat && (activeChat.item_id || activeChat.item)) {
+      itemApi
+        .getListingDetail(activeChat.item_id || activeChat.item)
+        .then((data) => setActiveItemDetails(data))
+        .catch((err) => console.error("İlan detayları çekilemedi", err));
     }
-  }, [offerDates.start_date, offerDates.end_date, activeChat]);
+  }, [activeChat]);
+
+  // Dolu günleri parse et (Gri yapmak için)
+  const excludedIntervals =
+    activeItemDetails?.booked_dates?.map((range) => ({ start: parseISO(range.start), end: parseISO(range.end) })) || [];
+
+  // 🎯 YENİ: Takvimden gün seçildiğinde fiyatı ve tarihleri güncelle
+  useEffect(() => {
+    if (startDate && endDate && activeChat?.item_price) {
+      const diffTime = Math.abs(endDate - startDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      const calculatedTotal = diffDays * parseFloat(activeChat.item_price);
+      setOfferPrice(calculatedTotal.toString());
+      setOfferDates({
+        start_date: startDate.toISOString().split("T")[0],
+        end_date: endDate.toISOString().split("T")[0],
+      });
+    } else {
+      setOfferDates({ start_date: "", end_date: "" });
+    }
+  }, [startDate, endDate, activeChat]);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
@@ -238,7 +264,7 @@ const Chat = () => {
     setMapPosition([lat, lon]);
     setModalMapCenter([lat, lon]);
     setLocationAddress(result.name || result.display_name.split(",")[0]);
-    searchResults([]);
+    setSearchResults([]);
   };
 
   const handleSendLocation = async () => {
@@ -279,15 +305,15 @@ const Chat = () => {
 
   const openOfferModal = (specificOffer = null) => {
     if (specificOffer) {
-      setOfferDates({ start_date: specificOffer.start, end_date: specificOffer.end });
+      setDateRange([new Date(specificOffer.start), new Date(specificOffer.end)]);
       setOfferPrice(specificOffer.price);
     } else {
       const lastOffer = [...messages].reverse().find((m) => m.is_offer);
       if (lastOffer) {
-        setOfferDates({ start_date: lastOffer.offer_start_date, end_date: lastOffer.offer_end_date });
+        setDateRange([new Date(lastOffer.offer_start_date), new Date(lastOffer.offer_end_date)]);
         setOfferPrice(lastOffer.offer_price);
       } else {
-        setOfferDates({ start_date: "", end_date: "" });
+        setDateRange([null, null]);
         setOfferPrice("");
       }
     }
@@ -297,7 +323,24 @@ const Chat = () => {
   const handleSendOffer = async (e) => {
     e.preventDefault();
     if (!offerPrice || !offerDates.start_date || !offerDates.end_date) {
-      return toast.fire({ icon: "warning", title: "Lütfen tarihleri ve teklif tutarınızı eksiksiz girin." });
+      return toast.fire({ icon: "warning", title: "Lütfen takvimden tarihleri ve bütçenizi eksiksiz girin." });
+    }
+
+    // 🎯 ÇÖZÜM 7: Teklifin dolu günlerle çakışıp çakışmadığının güvenliği
+    const isOverlap = excludedIntervals.some((interval) => {
+      const oStart = new Date(offerDates.start_date);
+      const oEnd = new Date(offerDates.end_date);
+      oStart.setHours(0, 0, 0, 0);
+      oEnd.setHours(0, 0, 0, 0);
+      const iStart = new Date(interval.start);
+      const iEnd = new Date(interval.end);
+      iStart.setHours(0, 0, 0, 0);
+      iEnd.setHours(0, 0, 0, 0);
+      return oStart <= iEnd && oEnd >= iStart;
+    });
+
+    if (isOverlap) {
+      return toast.fire({ icon: "error", title: "Seçtiğiniz tarihlerde ürün dolu! Lütfen gri renkli (dolu) günleri seçmeyin." });
     }
 
     setIsSubmittingOffer(true);
@@ -322,7 +365,7 @@ const Chat = () => {
       }
 
       setIsOfferModalOpen(false);
-      setOfferDates({ start_date: "", end_date: "" });
+      setDateRange([null, null]);
       setOfferPrice("");
       toast.fire({ icon: "success", title: "Teklifiniz karşı tarafa iletildi!" });
     } catch (error) {
@@ -548,7 +591,6 @@ const Chat = () => {
                 ) : (
                   messages.map((msg) => {
                     const isMe = String(msg.sender).toLowerCase() === currentUserId;
-                    // 🎯 DİKKAT: RentCircle Destek Yetkili Hesap Kontrolü
                     const isSupport = msg.sender_username === "rentcircle_destek" || msg.sender_name === "RentCircle Destek";
 
                     // 1️⃣ YENİ ŞIK TEKLİF KARTI
@@ -823,7 +865,7 @@ const Chat = () => {
         </div>
       </div>
 
-      {/* 🎯 TEKLİF VER / DÜZENLE MODALI */}
+      {/* 🎯 ÇÖZÜM 7: TEKLİF VER / DÜZENLE MODALI (TAKVİM EKLENDİ) */}
       <AnimatePresence>
         {isOfferModalOpen && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -831,54 +873,25 @@ const Chat = () => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="cyber-card p-6 w-full max-w-sm border border-amber-500/30 shadow-2xl shadow-amber-500/10">
+              className="cyber-card p-6 w-full max-w-[340px] border border-amber-500/30 shadow-2xl shadow-amber-500/10">
               <h3 className="text-lg font-black text-slate-100 mb-1 cursor-default">🤝 Teklif İlet</h3>
-              <p className="text-[10px] text-slate-400 mb-6 cursor-default">
-                Tarihleri ve önermek istediğiniz tutarı girin. Satıcı onaylarsa anında ödeme yapabilirsiniz.
-              </p>
+              <p className="text-[10px] text-slate-400 mb-4 cursor-default">Müsait tarihleri seçin ve tutarı belirleyin.</p>
 
               <form onSubmit={handleSendOffer} className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 cursor-default">Başlangıç</label>
-                    <input
-                      type="date"
-                      required
-                      min={new Date().toISOString().split("T")[0]}
-                      value={offerDates.start_date}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setOfferDates({ ...offerDates, start_date: val, end_date: "" });
-                      }}
-                      className="cyber-input text-xs cursor-pointer hover:border-amber-500/50 transition-colors focus:border-amber-500"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 cursor-default">Bitiş</label>
-                    <input
-                      type="date"
-                      required
-                      disabled={!offerDates.start_date}
-                      min={offerDates.start_date}
-                      value={offerDates.end_date}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setOfferDates({ ...offerDates, end_date: val });
-                        if (offerDates.start_date && val && activeChat?.item_price) {
-                          const start = new Date(offerDates.start_date);
-                          const end = new Date(val);
-                          if (end >= start) {
-                            const diffDays = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)) + 1;
-                            setOfferPrice((diffDays * parseFloat(activeChat.item_price)).toString());
-                          }
-                        }
-                      }}
-                      className="cyber-input text-xs cursor-pointer disabled:opacity-40 hover:border-amber-500/50 transition-colors focus:border-amber-500"
-                    />
-                  </div>
+                {/* 📅 TAKVİM BİLEŞENİ */}
+                <div className="w-full bg-slate-900/50 p-2 rounded-xl border border-slate-700/50 flex justify-center scale-90 origin-top">
+                  <DatePicker
+                    selectsRange={true}
+                    startDate={startDate}
+                    endDate={endDate}
+                    onChange={(update) => setDateRange(update)}
+                    excludeDateIntervals={excludedIntervals}
+                    minDate={new Date()}
+                    inline
+                  />
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-1 -mt-4">
                   <label className="text-[10px] uppercase font-black text-slate-400 font-mono block cursor-default">
                     Teklif Edilen Toplam Tutar (₺)
                   </label>
@@ -891,9 +904,6 @@ const Chat = () => {
                     onChange={(e) => setOfferPrice(e.target.value)}
                     className="cyber-input w-full text-base font-bold hover:border-amber-500/50 transition-colors focus:border-amber-500"
                   />
-                  <p className="text-[9px] text-slate-500 text-right mt-1">
-                    * Fiyat otomatik hesaplanabilir, ancak dilediğiniz gibi değiştirebilirsiniz.
-                  </p>
                 </div>
 
                 <div className="flex gap-3 pt-2">
@@ -916,7 +926,7 @@ const Chat = () => {
         )}
       </AnimatePresence>
 
-      {/* LOKASYON MODALI */}
+      {/* LOKASYON MODALI AYNEN KORUNDU */}
       <AnimatePresence>
         {isLocationModalOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">

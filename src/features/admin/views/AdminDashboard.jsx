@@ -3,13 +3,21 @@ import { itemApi } from "../../items/services/itemApi";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, cyberConfirm } from "../../../utils/alerts";
 import NotFound from "../../components/NotFound";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [loading, setLoading] = useState(true);
   const [isUnauthorized, setIsUnauthorized] = useState(false);
-  const [activeTab, setActiveTab] = useState("stats");
+
+  // URL tab hafızası
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "stats");
+
+  useEffect(() => {
+    setSearchParams({ tab: activeTab }, { replace: true });
+  }, [activeTab, setSearchParams]);
 
   // VERİ STATE'LERİ
   const [stats, setStats] = useState(null);
@@ -28,7 +36,7 @@ const AdminDashboard = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [bannedFilter, setBannedFilter] = useState("all");
 
-  // MODAL VE İŞLEM STATE'LERİ
+  // MODAL STATE'LERİ
   const [pendingAction, setPendingAction] = useState(null);
   const [selectedDispute, setSelectedDispute] = useState(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -38,6 +46,9 @@ const AdminDashboard = () => {
   const [supportModal, setSupportModal] = useState({ isOpen: false, type: null, data: null });
   const [supportReplyText, setSupportReplyText] = useState("");
   const [isReplying, setIsReplying] = useState(false);
+
+  // 🎯 YENİ: Anlaşmazlık fotoğraflarına tıklayınca büyütmek için
+  const [previewImage, setPreviewImage] = useState(null);
 
   const openSupportModal = (type, data) => {
     setSupportModal({ isOpen: true, type, data });
@@ -61,7 +72,7 @@ const AdminDashboard = () => {
         ticket_id: supportModal.type === "ticket" ? supportModal.data.id : null,
       });
 
-      toast.fire({ icon: "success", title: "Yanıtınız 'RentCircle Destek' hesabı üzerinden kullanıcıya iletildi." });
+      toast.fire({ icon: "success", title: "Yanıtınız iletildi." });
       setSupportModal({ isOpen: false, type: null, data: null });
       fetchAdminData();
     } catch (error) {
@@ -236,14 +247,14 @@ const AdminDashboard = () => {
     const { value, isConfirmed } = await cyberConfirm.fire({
       title: winner === "owner" ? "Satıcı Haklı" : "Kiracı Haklı",
       input: "textarea",
-      inputPlaceholder: "Gerekçe giriniz...",
+      inputPlaceholder: "Yöneticinin Karar Gerekçesi (Kullanıcılara iletilecek)...",
       showCancelButton: true,
-      confirmButtonText: "Onayla",
+      confirmButtonText: "Kararı Onayla",
     });
     if (isConfirmed && value) {
       try {
         await itemApi.resolveDispute(bookingId, { winner, resolution_note: value });
-        toast.fire({ icon: "success", title: "Çözüldü." });
+        toast.fire({ icon: "success", title: "Anlaşmazlık Çözüldü." });
         setSelectedDispute(null);
         fetchAdminData();
       } catch (e) {
@@ -261,7 +272,6 @@ const AdminDashboard = () => {
       confirmButtonText: "Evet, Çıkış Yap",
       cancelButtonText: "İptal",
     });
-
     if (result.isConfirmed) {
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
@@ -271,13 +281,8 @@ const AdminDashboard = () => {
     }
   };
 
-  const getBannedUsers = () => {
-    return users.filter((u) => u.banned_until || u.is_active === false);
-  };
-
-  const getBannedItems = () => {
-    return items.filter((i) => i.is_banned);
-  };
+  const getBannedUsers = () => users.filter((u) => u.banned_until || u.is_active === false);
+  const getBannedItems = () => items.filter((i) => i.is_banned);
 
   if (isUnauthorized) return <NotFound />;
   if (loading)
@@ -304,6 +309,7 @@ const AdminDashboard = () => {
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
+      {/* SIDEBAR */}
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col hidden md:flex shrink-0 shadow-sm z-20">
         <div className="h-20 flex items-center px-6 border-b border-slate-100">
           <div className="flex items-center gap-2 cursor-default select-none">
@@ -315,7 +321,6 @@ const AdminDashboard = () => {
             </span>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 scrollbar-hide">
           <div className="text-[10px] font-bold tracking-widest text-slate-400 uppercase mb-3 ml-2">Yönetim Menüsü</div>
           {TABS.map((tab) => (
@@ -347,7 +352,6 @@ const AdminDashboard = () => {
             </button>
           ))}
         </div>
-
         <div className="p-4 border-t border-slate-100 space-y-2 bg-slate-50/50">
           <button
             onClick={() => (window.location.href = "/dashboard")}
@@ -362,6 +366,7 @@ const AdminDashboard = () => {
         </div>
       </aside>
 
+      {/* ANA İÇERİK */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-10">
           <div className="hidden md:flex items-center bg-slate-100 rounded-full px-4 py-2.5 w-96 border border-transparent focus-within:border-blue-300 focus-within:bg-white transition-all shadow-inner">
@@ -374,7 +379,6 @@ const AdminDashboard = () => {
               className="bg-transparent border-none outline-none w-full text-sm text-slate-700 placeholder-slate-400"
             />
           </div>
-
           <div className="flex items-center gap-4 ml-auto">
             <div className="flex flex-col text-right hidden sm:flex">
               <span className="text-sm font-bold text-slate-800">Sistem Yöneticisi</span>
@@ -387,14 +391,7 @@ const AdminDashboard = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-8 scrollbar-thin scrollbar-thumb-slate-300">
-          <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500 rounded-3xl p-8 md:p-10 mb-8 shadow-xl shadow-blue-500/20 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
-            <h2 className="text-3xl md:text-4xl font-black text-white tracking-tight mb-2 relative z-10">Sisteme Hoş Geldiniz!</h2>
-            <p className="text-blue-100 text-sm md:text-base font-medium max-w-2xl relative z-10">
-              Tüm platform verilerini, CRUD işlemlerini ve kullanıcı hareketlerini bu panelden güvenle yönetebilirsiniz.
-            </p>
-          </div>
-
+          {/* TAB 1: STATS */}
           {activeTab === "stats" && stats && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
@@ -421,6 +418,7 @@ const AdminDashboard = () => {
             </div>
           )}
 
+          {/* TAB 2: FINANCES */}
           {activeTab === "finances" && (
             <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
               <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
@@ -477,6 +475,7 @@ const AdminDashboard = () => {
             </div>
           )}
 
+          {/* TAB 3: TICKETS */}
           {activeTab === "tickets" && (
             <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
               <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
@@ -530,6 +529,7 @@ const AdminDashboard = () => {
             </div>
           )}
 
+          {/* TAB 4: REPORTS */}
           {activeTab === "reports" && (
             <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
               <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
@@ -555,14 +555,14 @@ const AdminDashboard = () => {
                         <td className="px-6 py-4">
                           {rep.target_type === "item" ? (
                             <>
-                              <span className="bg-indigo-50 text-indigo-600 text-[10px] px-2 py-0.5 rounded font-bold mr-2">İLAN</span>{" "}
+                              <span className="bg-indigo-50 text-indigo-600 text-[10px] px-2 py-0.5 rounded font-bold mr-2">İLAN</span>
                               <span className="font-semibold text-slate-700">{rep.reported_item_title}</span>
                             </>
                           ) : (
                             <>
                               <span className="bg-fuchsia-50 text-fuchsia-600 text-[10px] px-2 py-0.5 rounded font-bold mr-2">
                                 KULLANICI
-                              </span>{" "}
+                              </span>
                               <span className="font-semibold text-slate-700">@{rep.reported_username}</span>
                             </>
                           )}
@@ -582,7 +582,7 @@ const AdminDashboard = () => {
                                       : `/admin-dashboard/users/${rep.reported_user}`,
                                   )
                                 }
-                                className="bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 shadow-sm">
+                                className="bg-emerald-50 text-emerald-600 hover:bg-emerald-500 hover:text-white border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-95 shadow-sm">
                                 Profili İncele
                               </button>
                               <button
@@ -612,6 +612,228 @@ const AdminDashboard = () => {
             </div>
           )}
 
+          {/* TAB 5: USERS */}
+          {activeTab === "users" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Tüm Kullanıcılar</h3>
+              </div>
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4">Kullanıcı Bilgileri</th>
+                    <th className="px-6 py-4">Cüzdan</th>
+                    <th className="px-6 py-4">Yetki</th>
+                    <th className="px-6 py-4 text-center">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {users.map((user) => (
+                    <tr key={user.id} className="hover:bg-emerald-50/30 transition-colors group">
+                      <td className="px-6 py-4 flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-600">
+                          {user.username[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-800">
+                            {user.first_name} {user.last_name}
+                          </div>
+                          <div className="text-xs text-slate-400">@{user.username}</div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-black text-slate-700 text-lg">₺{user.wallet_balance}</td>
+                      <td className="px-6 py-4">
+                        {user.is_staff ? (
+                          <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-full">YÖNETİCİ</span>
+                        ) : (
+                          <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2.5 py-1 rounded-full">ÜYE</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button
+                          onClick={() => navigate(`/admin-dashboard/users/${user.id}`)}
+                          className="text-xs bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white border border-emerald-200 px-4 py-2 rounded-lg font-bold transition-all shadow-sm">
+                          İncele
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* TAB 6: ITEMS */}
+          {activeTab === "items" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {items.map((item) => (
+                <div
+                  key={item.id}
+                  className="bg-white p-5 rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-sm hover:shadow-md transition-all flex flex-col group relative">
+                  <div className="flex gap-4 items-center mb-4">
+                    <img
+                      src={item.images?.[0]?.image || "https://via.placeholder.com/80"}
+                      alt="item"
+                      className="w-16 h-16 rounded-xl object-cover border border-slate-100"
+                    />
+                    <div className="flex-1 overflow-hidden">
+                      <h3 className="text-sm font-bold text-slate-800 truncate">{item.title}</h3>
+                      <div className="text-xs text-slate-400 mt-1">@{item.owner_username}</div>
+                      <div className="text-lg font-black text-slate-800 mt-1">₺{item.price_per_day}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/admin-dashboard/items/${item.id}`)}
+                    className="w-full bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white font-bold text-xs py-2.5 rounded-xl border border-emerald-200 transition-colors shadow-sm">
+                    Detaylı İncele
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* TAB 7: CATEGORIES */}
+          {activeTab === "categories" && (
+            <div className="space-y-6">
+              <div className="flex justify-end">
+                <button
+                  onClick={() => openCategoryModal()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-md shadow-blue-500/20 active:scale-95 text-sm flex items-center gap-2">
+                  <span>➕</span> Yeni Kategori
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {categories.map((cat) => (
+                  <div
+                    key={cat.id}
+                    className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex justify-between items-center group">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-base">{cat.name}</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">/{cat.slug}</p>
+                    </div>
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => openCategoryModal(cat)}
+                        className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center transition-colors">
+                        ✎
+                      </button>
+                      <button
+                        onClick={() => requestDelete("category", cat)}
+                        className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors">
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 8: BOOKINGS */}
+          {activeTab === "bookings" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Tüm Kiralamalar</h3>
+              </div>
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4">Kiralama ID</th>
+                    <th className="px-6 py-4">Ürün</th>
+                    <th className="px-6 py-4">Süreç</th>
+                    <th className="px-6 py-4 text-center">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {bookings.map((booking) => (
+                    <tr key={booking.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 font-mono text-xs text-slate-500">#{booking.id.split("-")[0]}</td>
+                      <td className="px-6 py-4 font-bold text-slate-800">{booking.item_detail?.title || "Bilinmiyor"}</td>
+                      <td className="px-6 py-4">
+                        <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-bold">{booking.status}</span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button
+                          onClick={() => requestDelete("booking", booking)}
+                          className="text-xs text-rose-500 hover:text-rose-700 font-bold hover:underline">
+                          SİL
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* TAB 9: REVIEWS */}
+          {activeTab === "reviews" && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
+                <h3 className="font-bold text-slate-700">Tüm Yorumlar</h3>
+              </div>
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4">Kullanıcı</th>
+                    <th className="px-6 py-4">Ürün</th>
+                    <th className="px-6 py-4 w-1/2">Yorum & Puan</th>
+                    <th className="px-6 py-4 text-center">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {reviews.map((review) => (
+                    <tr key={review.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 font-bold text-slate-700">@{review.reviewer_username}</td>
+                      <td className="px-6 py-4 font-semibold text-slate-600">{review.item_title || "Bilinmiyor"}</td>
+                      <td className="px-6 py-4">
+                        <div className="text-amber-500 text-xs mb-1">{"⭐".repeat(review.rating)}</div>
+                        <div className="text-slate-500 italic">"{review.comment}"</div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button
+                          onClick={() => requestDelete("review", review)}
+                          className="text-xs text-rose-500 hover:text-rose-700 font-bold hover:underline">
+                          SİL
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* TAB 10: DISPUTES (ÇÖZÜM MERKEZİ) */}
+          {activeTab === "disputes" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {disputes.map((booking) => (
+                <div key={booking.id} className="bg-white p-6 rounded-3xl border border-rose-200 shadow-sm relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-rose-50 rounded-full blur-xl pointer-events-none"></div>
+                  <div className="text-[10px] font-black tracking-widest text-rose-500 mb-2 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>AÇIK ANLAŞMAZLIK
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 mb-4">{booking.item_detail.title}</h3>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-5">
+                    <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">Şikayet Nedeni</div>
+                    <div className="text-sm text-slate-600 italic">"{booking.dispute_reason}"</div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedDispute(booking)}
+                    className="w-full py-3 bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold rounded-xl shadow-md shadow-rose-500/20 active:scale-95 transition-all">
+                    Dosyayı İncele ve Karar Ver
+                  </button>
+                </div>
+              ))}
+              {disputes.length === 0 && (
+                <div className="col-span-full p-10 text-center text-slate-500 bg-white rounded-3xl border border-slate-200 border-dashed">
+                  Şu an için inceleme bekleyen bir uyuşmazlık bulunmuyor. 🎉
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 11: BANNED */}
           {activeTab === "banned" && (
             <div className="space-y-6">
               <div className="flex gap-2">
@@ -657,7 +879,7 @@ const AdminDashboard = () => {
                         <td className="px-6 py-4 text-center">
                           <button
                             onClick={() => navigate(`/admin-dashboard/users/${u.id}`)}
-                            className="text-blue-500 hover:underline font-bold text-xs">
+                            className="text-emerald-500 hover:underline font-bold text-xs">
                             Detay
                           </button>
                         </td>
@@ -676,7 +898,7 @@ const AdminDashboard = () => {
                         <td className="px-6 py-4 text-center">
                           <button
                             onClick={() => navigate(`/admin-dashboard/items/${i.id}`)}
-                            className="text-blue-500 hover:underline font-bold text-xs">
+                            className="text-emerald-500 hover:underline font-bold text-xs">
                             Detay
                           </button>
                         </td>
@@ -695,216 +917,7 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {activeTab === "users" && (
-            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-                <h3 className="font-bold text-slate-700">Tüm Kullanıcılar</h3>
-              </div>
-              <table className="w-full text-left text-sm text-slate-600">
-                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-4">Kullanıcı Bilgileri</th>
-                    <th className="px-6 py-4">Cüzdan</th>
-                    <th className="px-6 py-4">Yetki</th>
-                    <th className="px-6 py-4 text-center">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-blue-50/50 transition-colors group">
-                      <td className="px-6 py-4 flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-600">
-                          {user.username[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="font-bold text-slate-800">
-                            {user.first_name} {user.last_name}
-                          </div>
-                          <div className="text-xs text-slate-400">@{user.username}</div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 font-black text-slate-700 text-lg">₺{user.wallet_balance}</td>
-                      <td className="px-6 py-4">
-                        {user.is_staff ? (
-                          <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-full">YÖNETİCİ</span>
-                        ) : (
-                          <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2.5 py-1 rounded-full">ÜYE</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <button
-                          onClick={() => navigate(`/admin-dashboard/users/${user.id}`)}
-                          className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-lg font-bold transition-all">
-                          İncele
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {activeTab === "items" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 hover:border-blue-300 shadow-sm hover:shadow-md transition-all flex flex-col group relative">
-                  <div className="flex gap-4 items-center mb-4">
-                    <img
-                      src={item.images?.[0]?.image || "https://via.placeholder.com/80"}
-                      alt="item"
-                      className="w-16 h-16 rounded-xl object-cover border border-slate-100"
-                    />
-                    <div className="flex-1 overflow-hidden">
-                      <h3 className="text-sm font-bold text-slate-800 truncate">{item.title}</h3>
-                      <div className="text-xs text-slate-400 mt-1">@{item.owner_username}</div>
-                      <div className="text-lg font-black text-slate-800 mt-1">₺{item.price_per_day}</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => navigate(`/admin-dashboard/items/${item.id}`)}
-                    className="w-full bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 font-bold text-xs py-2.5 rounded-xl border border-slate-200 transition-colors">
-                    Detaylı İncele
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {activeTab === "categories" && (
-            <div className="space-y-6">
-              <div className="flex justify-end">
-                <button
-                  onClick={() => openCategoryModal()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-md shadow-blue-500/20 active:scale-95 text-sm flex items-center gap-2">
-                  <span>➕</span> Yeni Kategori
-                </button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                {categories.map((cat) => (
-                  <div
-                    key={cat.id}
-                    className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex justify-between items-center group">
-                    <div>
-                      <h3 className="font-bold text-slate-800 text-base">{cat.name}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">/{cat.slug}</p>
-                    </div>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => openCategoryModal(cat)}
-                        className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center transition-colors">
-                        ✎
-                      </button>
-                      <button
-                        onClick={() => requestDelete("category", cat)}
-                        className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors">
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {activeTab === "bookings" && (
-            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-                <h3 className="font-bold text-slate-700">Tüm Kiralamalar</h3>
-              </div>
-              <table className="w-full text-left text-sm text-slate-600">
-                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-4">Kiralama ID</th>
-                    <th className="px-6 py-4">Ürün</th>
-                    <th className="px-6 py-4">Süreç</th>
-                    <th className="px-6 py-4 text-center">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {bookings.map((booking) => (
-                    <tr key={booking.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 font-mono text-xs text-slate-500">#{booking.id.split("-")[0]}</td>
-                      <td className="px-6 py-4 font-bold text-slate-800">{booking.item_detail?.title || "Bilinmiyor"}</td>
-                      <td className="px-6 py-4">
-                        <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs font-bold">{booking.status}</span>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <button
-                          onClick={() => requestDelete("booking", booking)}
-                          className="text-xs text-rose-500 hover:text-rose-700 font-bold hover:underline">
-                          SİL
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {activeTab === "reviews" && (
-            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
-                <h3 className="font-bold text-slate-700">Tüm Yorumlar</h3>
-              </div>
-              <table className="w-full text-left text-sm text-slate-600">
-                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="px-6 py-4">Kullanıcı</th>
-                    <th className="px-6 py-4">Ürün</th>
-                    <th className="px-6 py-4 w-1/2">Yorum & Puan</th>
-                    <th className="px-6 py-4 text-center">İşlem</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {reviews.map((review) => (
-                    <tr key={review.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 font-bold text-slate-700">@{review.reviewer_username}</td>
-                      <td className="px-6 py-4 font-semibold text-slate-600">{review.item_title || "Bilinmiyor"}</td>
-                      <td className="px-6 py-4">
-                        <div className="text-amber-500 text-xs mb-1">{"⭐".repeat(review.rating)}</div>
-                        <div className="text-slate-500 italic">"{review.comment}"</div>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <button
-                          onClick={() => requestDelete("review", review)}
-                          className="text-xs text-rose-500 hover:text-rose-700 font-bold hover:underline">
-                          SİL
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {activeTab === "disputes" && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {disputes.map((booking) => (
-                <div key={booking.id} className="bg-white p-6 rounded-3xl border border-rose-200 shadow-sm relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-rose-50 rounded-full blur-xl pointer-events-none"></div>
-                  <div className="text-[10px] font-black tracking-widest text-rose-500 mb-2 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>AÇIK ANLAŞMAZLIK
-                  </div>
-                  <h3 className="text-lg font-bold text-slate-800 mb-4">{booking.item_detail.title}</h3>
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-5">
-                    <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">Şikayet Nedeni</div>
-                    <div className="text-sm text-slate-600 italic">"{booking.dispute_reason}"</div>
-                  </div>
-                  <button
-                    onClick={() => setSelectedDispute(booking)}
-                    className="w-full py-3 bg-rose-500 hover:bg-rose-600 text-white text-sm font-bold rounded-xl shadow-md shadow-rose-500/20 active:scale-95 transition-all">
-                    Dosyayı İncele
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
+          {/* TAB 12: LOGS */}
           {activeTab === "logs" && (
             <div className="bg-slate-800 border border-slate-700 rounded-3xl overflow-hidden shadow-xl">
               <div className="bg-slate-900 border-b border-slate-800 px-5 py-3 text-xs text-slate-400 font-mono flex items-center justify-between">
@@ -929,7 +942,7 @@ const AdminDashboard = () => {
 
       {/* ======================= MODALLAR ======================= */}
 
-      {/* 🎯 DESTEK VE ŞİKAYET YANIT MODALI */}
+      {/* DESTEK YANIT MODALI */}
       <AnimatePresence>
         {supportModal.isOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
@@ -968,7 +981,8 @@ const AdminDashboard = () => {
                       <img
                         src={supportModal.data.attachment || supportModal.data.proof_image}
                         alt="Kanıt"
-                        className="w-full max-h-64 object-contain bg-slate-200 rounded-xl border border-slate-300"
+                        className="w-full max-h-64 object-contain bg-slate-200 rounded-xl border border-slate-300 cursor-zoom-in"
+                        onClick={() => setPreviewImage(supportModal.data.attachment || supportModal.data.proof_image)}
                       />
                     </div>
                   )}
@@ -987,9 +1001,6 @@ const AdminDashboard = () => {
                       value={supportReplyText}
                       onChange={(e) => setSupportReplyText(e.target.value)}
                       className="w-full bg-white border border-slate-200 focus:border-blue-500 text-slate-800 text-sm rounded-xl p-4 outline-none resize-none transition-colors"></textarea>
-                    <p className="text-[10px] text-slate-400">
-                      Bu mesaj kullanıcının gelen kutusuna "RentCircle Destek" resmi adıyla düşecektir.
-                    </p>
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button
@@ -1013,6 +1024,7 @@ const AdminDashboard = () => {
         )}
       </AnimatePresence>
 
+      {/* KATEGORİ MODALI */}
       <AnimatePresence>
         {isCategoryModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -1056,37 +1068,94 @@ const AdminDashboard = () => {
         )}
       </AnimatePresence>
 
-      {selectedDispute && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white shadow-2xl rounded-3xl w-full max-w-2xl p-8 overflow-hidden">
-            <h2 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">
-              <span className="text-rose-500">🚨</span> Anlaşmazlık: {selectedDispute.item_detail.title}
-            </h2>
-            <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 mb-6">
-              <div className="text-[10px] uppercase font-bold text-slate-500 mb-2">Şikayet Açıklaması</div>
-              <div className="text-sm text-slate-700 font-medium leading-relaxed">"{selectedDispute.dispute_reason}"</div>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleResolveDispute(selectedDispute.id, "owner")}
-                className="flex-1 bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white border border-emerald-200 py-3 rounded-xl font-bold text-xs transition-colors">
-                Satıcı Haklı
-              </button>
-              <button
-                onClick={() => handleResolveDispute(selectedDispute.id, "renter")}
-                className="flex-1 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white border border-blue-200 py-3 rounded-xl font-bold text-xs transition-colors">
-                Kiracı Haklı
-              </button>
-              <button
-                onClick={() => setSelectedDispute(null)}
-                className="px-6 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-xs transition-colors">
-                Kapat
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 🎯 GELİŞTİRİLMİŞ ÇÖZÜM MERKEZİ MODALI (FOTOĞRAFLI) */}
+      <AnimatePresence>
+        {selectedDispute && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white shadow-2xl rounded-3xl w-full max-w-3xl p-8 max-h-[90vh] overflow-y-auto relative">
+              <h2 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">
+                <span className="text-rose-500">🚨</span> Anlaşmazlık: {selectedDispute.item_detail?.title}
+              </h2>
 
+              <div className="bg-rose-50 p-4 rounded-xl border border-rose-200 mb-6">
+                <div className="text-[10px] uppercase font-bold text-rose-500 mb-1">Şikayet Nedeni</div>
+                <div className="text-sm text-slate-700 font-medium">"{selectedDispute.dispute_reason}"</div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                {/* 📦 KİRACI TESLİMAT KANITLARI */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div className="text-[10px] uppercase font-bold text-slate-500 mb-2">Kiracının Teslimat Kanıtları</div>
+                  <p className="text-xs text-slate-600 italic mb-3">Not: {selectedDispute.handover_notes || "Not bırakılmamış."}</p>
+
+                  {selectedDispute.handover_images && selectedDispute.handover_images.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedDispute.handover_images.map((img, i) => (
+                        <img
+                          key={i}
+                          src={img.image || img}
+                          onClick={() => setPreviewImage(img.image || img)}
+                          className="w-16 h-16 object-cover rounded-lg border border-slate-300 cursor-zoom-in hover:scale-105 transition-transform shadow-sm"
+                          alt="teslimat kanıtı"
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400 font-mono">Fotoğraf yüklenmemiş.</div>
+                  )}
+                </div>
+
+                {/* 🔄 SATICI İADE KANITLARI */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div className="text-[10px] uppercase font-bold text-slate-500 mb-2">Satıcının İade Kanıtları</div>
+                  <p className="text-xs text-slate-600 italic mb-3">Not: {selectedDispute.return_notes || "Not bırakılmamış."}</p>
+
+                  {selectedDispute.return_images && selectedDispute.return_images.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedDispute.return_images.map((img, i) => (
+                        <img
+                          key={i}
+                          src={img.image || img}
+                          onClick={() => setPreviewImage(img.image || img)}
+                          className="w-16 h-16 object-cover rounded-lg border border-slate-300 cursor-zoom-in hover:scale-105 transition-transform shadow-sm"
+                          alt="iade kanıtı"
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400 font-mono">Fotoğraf yüklenmemiş.</div>
+                  )}
+                </div>
+              </div>
+
+              {/* KARAR BUTONLARI */}
+              <div className="flex flex-wrap gap-3 mt-4 pt-4 border-t border-slate-100">
+                <button
+                  onClick={() => handleResolveDispute(selectedDispute.id, "owner")}
+                  className="flex-1 min-w-[140px] bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white border border-emerald-200 py-3 rounded-xl font-bold text-xs transition-colors">
+                  Satıcı Haklı
+                </button>
+                <button
+                  onClick={() => handleResolveDispute(selectedDispute.id, "renter")}
+                  className="flex-1 min-w-[140px] bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white border border-blue-200 py-3 rounded-xl font-bold text-xs transition-colors">
+                  Kiracı Haklı
+                </button>
+                <button
+                  onClick={() => setSelectedDispute(null)}
+                  className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-xs transition-colors">
+                  Kapat
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* SİLME GERİ ALMA TOAST'I */}
       <AnimatePresence>
         {pendingAction && (
           <motion.div
@@ -1104,6 +1173,25 @@ const AdminDashboard = () => {
               Geri Al
             </button>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 🎯 LIGHTBOX (RESİM BÜYÜTME) MODALI */}
+      <AnimatePresence>
+        {previewImage && (
+          <div
+            className="fixed inset-0 z-[250] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
+            onClick={() => setPreviewImage(null)}>
+            <button className="absolute top-6 right-6 btn-slate !font-mono tracking-widest z-20">KAPAT [ESC]</button>
+            <motion.img
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              src={previewImage}
+              className="max-w-full max-h-[90vh] rounded-xl shadow-2xl border border-slate-700/50 cursor-default"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
         )}
       </AnimatePresence>
     </div>

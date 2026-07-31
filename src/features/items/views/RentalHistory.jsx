@@ -9,16 +9,18 @@ const RentalHistory = () => {
   const [activeTab, setActiveTab] = useState("renter");
   const [currentUserId, setCurrentUserId] = useState(null);
 
+  // 🎯 ÇİFT TARAFLI DEĞERLENDİRME STATE'LERİ
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
-  const [selectedBookingId, setSelectedBookingId] = useState(null);
-  const [rating, setRating] = useState(5);
-  const [comment, setComment] = useState("");
+  const [reviewData, setReviewData] = useState({ bookingId: null, rating: 5, comment: "", targetName: "", targetRole: "" });
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
   const fetchHistory = async () => {
     try {
       const data = await itemApi.getBookings();
-      const pastBookings = data.filter((b) => ["completed", "rejected", "disputed"].includes(b.status));
-      setHistory(pastBookings);
+      // Yalnızca bitmiş (completed), iptal edilmiş (rejected) işlemleri listeliyoruz.
+      // Not: 'disputed' genelde aktif bir sorun olduğu için Bookings'de kalması daha iyidir ama tercih senin.
+      const pastBookings = data.results || data;
+      setHistory(pastBookings.filter((b) => ["completed", "rejected"].includes(b.status)));
     } catch (error) {
       console.error("Geçmiş çekilemedi:", error);
     } finally {
@@ -39,30 +41,41 @@ const RentalHistory = () => {
     fetchHistory();
   }, []);
 
-  const openReviewModal = (bookingId) => {
-    setSelectedBookingId(bookingId);
-    setRating(5);
-    setComment("");
+  // 🎯 DİNAMİK MODAL AÇICI (Kiracı mı Satıcı mı değerlendirilecek?)
+  const openReviewModal = (booking) => {
+    const isRenter = activeTab === "renter";
+    const targetName = isRenter ? booking.item_detail.owner_username : booking.renter_name;
+    const targetRole = isRenter ? "Satıcı" : "Kiracı";
+
+    setReviewData({
+      bookingId: booking.id,
+      rating: 5,
+      comment: "",
+      targetName,
+      targetRole,
+    });
     setIsReviewModalOpen(true);
   };
 
-  const submitReview = async () => {
+  const submitReview = async (e) => {
+    e.preventDefault();
+    setIsSubmittingReview(true);
     try {
       await itemApi.createReview({
-        booking: selectedBookingId,
-        rating: rating,
-        comment: comment,
+        booking: reviewData.bookingId,
+        rating: reviewData.rating,
+        comment: reviewData.comment,
       });
-      // 🎯 DÜZELTME: Şık bildirim
       toast.fire({ icon: "success", title: "Değerlendirmeniz başarıyla kaydedildi!" });
       setIsReviewModalOpen(false);
       fetchHistory();
     } catch (error) {
-      // 🎯 DÜZELTME: Şık bildirim
       toast.fire({
         icon: "error",
         title: error.response?.data?.error?.[0] || error.response?.data?.error || "Değerlendirme gönderilemedi.",
       });
+    } finally {
+      setIsSubmittingReview(false);
     }
   };
 
@@ -76,11 +89,6 @@ const RentalHistory = () => {
       rejected: (
         <span className="px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-lg text-[11px] font-bold cursor-default">
           İptal Edildi
-        </span>
-      ),
-      disputed: (
-        <span className="px-3 py-1 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-lg text-[11px] font-bold cursor-default">
-          Uyuşmazlık (Sorunlu)
         </span>
       ),
     };
@@ -98,7 +106,7 @@ const RentalHistory = () => {
   });
 
   return (
-    <div className="w-full relative selection:bg-blue-500/30">
+    <div className="w-full relative selection:bg-blue-500/30 min-h-screen">
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
         <h1 className="text-2xl font-black text-slate-100 mb-6 cursor-default">Kiralama Geçmişim</h1>
 
@@ -157,16 +165,17 @@ const RentalHistory = () => {
                 </div>
 
                 <div className="flex flex-col gap-2 min-w-[180px]">
-                  {booking.status === "completed" && activeTab === "renter" && !booking.has_review && (
+                  {/* 🎯 SADECE TAMAMLANMIŞ İŞLEMLERDE DEĞERLENDİRME ÇIKAR */}
+                  {booking.status === "completed" && !booking.has_review && (
                     <button
-                      onClick={() => openReviewModal(booking.id)}
-                      className="btn-gradient p-2 text-xs bg-amber-500 hover:bg-amber-600 border-none shadow-lg shadow-amber-500/30 cursor-pointer hover:scale-105 active:scale-95 transition-all">
-                      ⭐ Satıcıyı Değerlendir
+                      onClick={() => openReviewModal(booking)}
+                      className="btn-gradient p-2 text-xs !bg-amber-500 !border-amber-400 shadow-lg shadow-amber-500/30 cursor-pointer hover:scale-105 active:scale-95 transition-all">
+                      ⭐ {activeTab === "renter" ? "Satıcıyı" : "Kiracıyı"} Değerlendir
                     </button>
                   )}
-                  {booking.status === "completed" && activeTab === "renter" && booking.has_review && (
+                  {booking.status === "completed" && booking.has_review && (
                     <div className="text-center text-xs text-amber-400 font-bold bg-amber-500/10 p-2 rounded-lg border border-amber-500/20 cursor-default hover:bg-amber-500/20 transition-colors">
-                      Değerlendirme Yapıldı
+                      ✅ Değerlendirme Yapıldı
                     </div>
                   )}
                 </div>
@@ -176,6 +185,7 @@ const RentalHistory = () => {
         </div>
       </div>
 
+      {/* 🎯 ÇİFT TARAFLI DEĞERLENDİRME MODALI */}
       <AnimatePresence>
         {isReviewModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -184,47 +194,56 @@ const RentalHistory = () => {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               className="cyber-card p-6 w-full max-w-sm border border-amber-500/30 shadow-2xl shadow-amber-500/10">
-              <h3 className="text-lg font-black text-slate-100 mb-1 cursor-default">Deneyiminizi Puanlayın</h3>
+              <h3 className="text-lg font-black text-amber-400 mb-1 cursor-default">⭐ {reviewData.targetRole}ı Değerlendir</h3>
               <p className="text-[10px] text-slate-400 mb-6 cursor-default">
-                Satıcıya ve ürüne vereceğiniz puan diğer kullanıcılar için referans olacaktır.
+                Kiralama deneyiminiz nasıldı? <b>@{reviewData.targetName}</b> isimli {reviewData.targetRole.toLowerCase()} için puanınızı ve
+                yorumunuzu bırakın.
               </p>
 
-              <div className="flex justify-center gap-2 mb-6">
-                {[1, 2, 3, 4, 5].map((star) => (
+              <form onSubmit={submitReview} className="space-y-4">
+                <div className="flex justify-center gap-2 mb-6">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setReviewData({ ...reviewData, rating: star })}
+                      className={`text-4xl hover:scale-125 cursor-pointer active:scale-90 transition-transform ${
+                        reviewData.rating >= star
+                          ? "text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.5)]"
+                          : "text-slate-700 grayscale"
+                      }`}>
+                      ★
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-1 mb-6">
+                  <label className="text-[10px] uppercase font-black text-slate-400 font-mono block cursor-default">
+                    Yorumunuz (İsteğe Bağlı)
+                  </label>
+                  <textarea
+                    value={reviewData.comment}
+                    onChange={(e) => setReviewData({ ...reviewData, comment: e.target.value })}
+                    placeholder="Deneyiminizi kısaca anlatın..."
+                    className="cyber-input w-full resize-none h-24 text-xs focus:border-amber-500 transition-colors"
+                  />
+                </div>
+
+                <div className="flex gap-3">
                   <button
-                    key={star}
                     type="button"
-                    onClick={() => setRating(star)}
-                    className={`text-4xl hover:scale-125 cursor-pointer active:scale-90 transition-transform ${rating >= star ? "text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.5)]" : "text-slate-700 grayscale"}`}>
-                    ★
+                    onClick={() => setIsReviewModalOpen(false)}
+                    className="btn-slate flex-1 cursor-pointer hover:bg-slate-700 active:scale-95 transition-all">
+                    İptal
                   </button>
-                ))}
-              </div>
-
-              <div className="space-y-1 mb-6">
-                <label className="text-[10px] uppercase font-black text-slate-400 font-mono block cursor-default">
-                  Yorumunuz (İsteğe Bağlı)
-                </label>
-                <textarea
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder="Ürün nasıldı? Satıcı ilgili miydi?"
-                  className="cyber-input w-full resize-none h-24 text-xs focus:border-amber-500 transition-colors"
-                />
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setIsReviewModalOpen(false)}
-                  className="btn-slate flex-1 cursor-pointer hover:bg-slate-700 active:scale-95 transition-all">
-                  İptal
-                </button>
-                <button
-                  onClick={submitReview}
-                  className="btn-gradient flex-1 !bg-amber-500 !border-amber-400 hover:scale-105 active:scale-95 transition-all shadow-lg shadow-amber-500/20 cursor-pointer">
-                  Gönder
-                </button>
-              </div>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReview}
+                    className="btn-gradient flex-1 !bg-amber-500 !border-amber-400 hover:scale-105 active:scale-95 transition-all shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50">
+                    {isSubmittingReview ? "Gönderiliyor..." : "Puanı Gönder"}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

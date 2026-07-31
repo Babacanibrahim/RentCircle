@@ -16,12 +16,15 @@ const BookingsDashboard = () => {
   const [pinActionType, setPinActionType] = useState("");
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [pinInput, setPinInput] = useState("");
-  const [notesInput, setNotesInput] = useState(""); // 🎯 YENİ: Yorum/Not alanı
+  const [notesInput, setNotesInput] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
 
   // Anlaşmazlık Modalı State'leri
   const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
   const [disputeReason, setDisputeReason] = useState("");
+
+  // Fotoğraf Önizleme (Lightbox) State'i
+  const [previewImage, setPreviewImage] = useState(null);
 
   const formatReadableDate = (dateString) => {
     if (!dateString) return "";
@@ -135,11 +138,6 @@ const BookingsDashboard = () => {
     }
   };
 
-  // -----------------------------------------------------------
-  // 🎯 YENİ UÇTAN UCA ONAYLAMA MANTIKLARI
-  // -----------------------------------------------------------
-
-  // SATICI: İlk ödeme gelince kiralama talebini onaylar
   const handleApprove = async (id) => {
     const result = await cyberConfirm.fire({
       title: "Talebi Onaylıyor musunuz?",
@@ -161,7 +159,6 @@ const BookingsDashboard = () => {
     }
   };
 
-  // SATICI: Kiracının gönderdiği teslimat fotoğraflarını inceler ve onaylar (handover_pending -> active)
   const handleApproveHandover = async (id) => {
     const result = await cyberConfirm.fire({
       title: "Teslimatı Onayla",
@@ -183,7 +180,6 @@ const BookingsDashboard = () => {
     }
   };
 
-  // KİRACI: Satıcının gönderdiği iade fotoğraflarını inceler ve onaylar (return_pending -> completed)
   const handleApproveReturn = async (id) => {
     const result = await cyberConfirm.fire({
       title: "İadeyi Onayla",
@@ -204,8 +200,6 @@ const BookingsDashboard = () => {
       toast.fire({ icon: "error", title: error.response?.data?.error || "Hata oluştu." });
     }
   };
-
-  // -----------------------------------------------------------
 
   const handleCancel = async (booking) => {
     const isApproved = booking.status === "approved";
@@ -273,7 +267,7 @@ const BookingsDashboard = () => {
 
     const formData = new FormData();
     formData.append("pin", pinInput);
-    formData.append("notes", notesInput); // 🎯 YENİ: Notları da gönderiyoruz
+    formData.append("notes", notesInput);
     selectedFiles.forEach((file) => {
       formData.append("images", file);
     });
@@ -295,7 +289,6 @@ const BookingsDashboard = () => {
     }
   };
 
-  // 🎯 YENİ: Uyuşmazlık (Dispute) Fonksiyonları
   const openDisputeModal = (bookingId) => {
     setSelectedBookingId(bookingId);
     setDisputeReason("");
@@ -354,11 +347,6 @@ const BookingsDashboard = () => {
           🚨 Anlaşmazlık Var
         </span>
       ),
-      completed: (
-        <span className="px-3 py-1 bg-slate-700/50 text-slate-300 border border-slate-600/50 rounded-lg text-[10px] font-black uppercase tracking-wider">
-          Tamamlandı
-        </span>
-      ),
     };
     return badges[status] || <span>{status}</span>;
   };
@@ -372,7 +360,7 @@ const BookingsDashboard = () => {
     const ownerId = String(b.item_detail.owner).toLowerCase();
     const isUserRoleMatch = activeTab === "renter" ? renterId === currentUserId : ownerId === currentUserId;
 
-    // 🎯 YENİ: Gösterilecek statüleri güncelledik (iptaller hariç her şey)
+    // 🎯 SADECE DEVAM EDEN İŞLEMLER
     const isActiveStatus = [
       "awaiting_payment",
       "pending_approval",
@@ -382,6 +370,7 @@ const BookingsDashboard = () => {
       "return_pending",
       "disputed",
     ].includes(b.status);
+
     return isUserRoleMatch && isActiveStatus;
   });
 
@@ -433,24 +422,51 @@ const BookingsDashboard = () => {
                   </div>
                 </div>
 
-                {/* ORTA: Fiyatlar ve Anlaşmazlık/Not Detayları */}
-                <div className="text-left md:text-center border-l border-r border-slate-700/50 px-6 max-w-[250px] flex-1 flex flex-col justify-center">
+                {/* ORTA: Fiyatlar ve Fotoğraf Galerisi */}
+                <div className="text-left md:text-center border-l border-r border-slate-700/50 px-6 max-w-[300px] flex-1 flex flex-col justify-center">
                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Toplam Kiralama</span>
                   <span className="text-lg font-black text-blue-400">₺{booking.total_price}</span>
                   <div className="text-[10px] text-slate-500 mt-1">+₺{booking.deposit_price} Güvence Bedeli</div>
 
-                  {/* Yeni: Varsa yorumları/itirazları göster */}
                   {booking.handover_notes && (
-                    <div className="mt-3 text-[10px] text-slate-400 italic bg-slate-900/50 p-2 rounded border border-slate-700/50">
-                      <span className="font-bold text-slate-300 not-italic block mb-0.5">Kiracının Teslimat Notu:</span>"
+                    <div className="mt-3 text-[10px] text-slate-400 italic bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 text-left">
+                      <span className="font-bold text-slate-300 not-italic block mb-1">Kiracının Teslimat Kanıtı:</span>"
                       {booking.handover_notes}"
+                      {booking.handover_images && booking.handover_images.length > 0 && (
+                        <div className="flex gap-2 mt-2">
+                          {booking.handover_images.map((img, i) => (
+                            <img
+                              key={i}
+                              src={img.image || img}
+                              onClick={() => setPreviewImage(img.image || img)}
+                              className="w-10 h-10 object-cover rounded-md border border-slate-600 cursor-zoom-in hover:scale-110 transition-transform shadow-sm"
+                              alt="kanıt"
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
+
                   {booking.return_notes && (
-                    <div className="mt-2 text-[10px] text-slate-400 italic bg-slate-900/50 p-2 rounded border border-slate-700/50">
-                      <span className="font-bold text-slate-300 not-italic block mb-0.5">Satıcının İade Notu:</span>"{booking.return_notes}"
+                    <div className="mt-3 text-[10px] text-slate-400 italic bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 text-left">
+                      <span className="font-bold text-slate-300 not-italic block mb-1">Satıcının İade Kanıtı:</span>"{booking.return_notes}"
+                      {booking.return_images && booking.return_images.length > 0 && (
+                        <div className="flex gap-2 mt-2">
+                          {booking.return_images.map((img, i) => (
+                            <img
+                              key={i}
+                              src={img.image || img}
+                              onClick={() => setPreviewImage(img.image || img)}
+                              className="w-10 h-10 object-cover rounded-md border border-slate-600 cursor-zoom-in hover:scale-110 transition-transform shadow-sm"
+                              alt="kanıt"
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
+
                   {booking.status === "disputed" && (
                     <div className="mt-2 text-[10px] text-rose-400 font-bold bg-rose-500/10 p-2 rounded border border-rose-500/30">
                       İtiraz Sebebi: "{booking.dispute_reason}"
@@ -460,7 +476,6 @@ const BookingsDashboard = () => {
 
                 {/* SAĞ: Aksiyon Butonları (Dinamik) */}
                 <div className="flex flex-col gap-2 min-w-[200px] shrink-0 justify-center">
-                  {/* --- 0. Ödeme / Onay --- */}
                   {booking.status === "awaiting_payment" && activeTab === "renter" && (
                     <button
                       onClick={() => handlePayPseudoBooking(booking)}
@@ -474,7 +489,6 @@ const BookingsDashboard = () => {
                     </button>
                   )}
 
-                  {/* İptal Et (Ödeme ve onay aşamasında) */}
                   {["awaiting_payment", "pending_approval", "approved"].includes(booking.status) && (
                     <button
                       onClick={() => handleCancel(booking)}
@@ -483,7 +497,6 @@ const BookingsDashboard = () => {
                     </button>
                   )}
 
-                  {/* --- 1. TESLİMAT AŞAMASI (approved) --- */}
                   {booking.status === "approved" && activeTab === "owner" && (
                     <div className="bg-slate-950 p-3 rounded-lg border border-slate-700 text-center">
                       <span className="text-[10px] text-slate-400 block">Teslim Ederken Kiracıya Söyle:</span>
@@ -498,7 +511,6 @@ const BookingsDashboard = () => {
                     </button>
                   )}
 
-                  {/* --- 2. TESLİMAT ONAYI AŞAMASI (handover_pending) --- */}
                   {booking.status === "handover_pending" && activeTab === "owner" && (
                     <>
                       <button
@@ -509,7 +521,7 @@ const BookingsDashboard = () => {
                       <button
                         onClick={() => openDisputeModal(booking.id)}
                         className="btn-slate !text-rose-400 p-2 text-[11px] hover:bg-rose-500/10 w-full border-rose-500/20 mt-1">
-                        🚨 İtiraz Et (Uyuşmazlık)
+                        🚨 Yanlış Beyan - İtiraz Et
                       </button>
                     </>
                   )}
@@ -519,7 +531,6 @@ const BookingsDashboard = () => {
                     </div>
                   )}
 
-                  {/* --- 3. İADE AŞAMASI (active) --- */}
                   {booking.status === "active" && activeTab === "renter" && (
                     <div className="bg-slate-950 p-3 rounded-lg border border-slate-700 text-center">
                       <span className="text-[10px] text-slate-400 block">İade Ederken Satıcıya Söyle:</span>
@@ -534,7 +545,6 @@ const BookingsDashboard = () => {
                     </button>
                   )}
 
-                  {/* --- 4. İADE ONAYI AŞAMASI (return_pending) --- */}
                   {booking.status === "return_pending" && activeTab === "renter" && (
                     <>
                       <button
@@ -545,7 +555,7 @@ const BookingsDashboard = () => {
                       <button
                         onClick={() => openDisputeModal(booking.id)}
                         className="btn-slate !text-rose-400 p-2 text-[11px] hover:bg-rose-500/10 w-full border-rose-500/20 mt-1">
-                        🚨 İtiraz Et (Hasar Var)
+                        🚨 Yanlış Beyan - İtiraz Et
                       </button>
                     </>
                   )}
@@ -555,7 +565,6 @@ const BookingsDashboard = () => {
                     </div>
                   )}
 
-                  {/* --- 5. ANLAŞMAZLIK AŞAMASI (disputed) --- */}
                   {booking.status === "disputed" && (
                     <div className="text-[10px] text-center w-full py-2 rounded-lg bg-rose-500/10 text-rose-400 font-bold border border-rose-500/30 cursor-default">
                       Yönetici İncelemesinde
@@ -568,7 +577,7 @@ const BookingsDashboard = () => {
         </div>
       </div>
 
-      {/* 🎯 PIN, FOTO VE NOT GİRİŞ MODALI */}
+      {/* 🎯 PIN VE FOTO YÜKLEME MODALI */}
       <AnimatePresence>
         {isPinModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -593,7 +602,6 @@ const BookingsDashboard = () => {
                 className="cyber-input w-full text-center text-2xl tracking-[0.5em] font-mono font-bold mb-4"
               />
 
-              {/* 🎯 YENİ: Yorum Alanı */}
               <textarea
                 placeholder="Ürünün durumu hakkında notunuz (Örn: Çiziksiz teslim aldım)"
                 rows={3}
@@ -647,7 +655,7 @@ const BookingsDashboard = () => {
         )}
       </AnimatePresence>
 
-      {/* 🎯 YENİ: İTİRAZ (DISPUTE) MODALI */}
+      {/* İTİRAZ MODALI */}
       <AnimatePresence>
         {isDisputeModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -658,10 +666,8 @@ const BookingsDashboard = () => {
               className="cyber-card p-6 w-full max-w-sm border border-rose-500/30 shadow-2xl shadow-rose-500/10">
               <h3 className="text-lg font-black text-rose-400 mb-2 flex items-center gap-2">🚨 Anlaşmazlık Bildir</h3>
               <p className="text-xs text-slate-400 mb-4">
-                Karşı tarafın yüklediği fotoğraflar veya notlar gerçeği yansıtmıyorsa, hasar varsa veya ürün eksikse lütfen detaylıca
-                açıklayın.
+                Karşı tarafın yüklediği fotoğraflar veya notlar gerçeği yansıtmıyorsa, lütfen detaylıca açıklayın.
               </p>
-
               <textarea
                 placeholder="Lütfen itiraz sebebinizi detaylı bir şekilde yazınız..."
                 rows={5}
@@ -669,7 +675,6 @@ const BookingsDashboard = () => {
                 onChange={(e) => setDisputeReason(e.target.value)}
                 className="cyber-input w-full resize-none text-sm mb-6"
               />
-
               <div className="flex gap-3">
                 <button onClick={() => setIsDisputeModalOpen(false)} className="btn-slate flex-1 cursor-pointer active:scale-95">
                   Vazgeç
@@ -681,6 +686,25 @@ const BookingsDashboard = () => {
                 </button>
               </div>
             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* FOTOĞRAF ÖNİZLEME (LIGHTBOX) MODALI */}
+      <AnimatePresence>
+        {previewImage && (
+          <div
+            className="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
+            onClick={() => setPreviewImage(null)}>
+            <button className="absolute top-6 right-6 btn-slate !font-mono tracking-widest z-20">KAPAT [ESC]</button>
+            <motion.img
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              src={previewImage}
+              className="max-w-full max-h-[90vh] rounded-xl shadow-2xl border border-slate-700/50 cursor-default"
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
         )}
       </AnimatePresence>

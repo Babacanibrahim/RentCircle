@@ -27,7 +27,6 @@ const ItemDetail = () => {
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 
-  // Takvim State'leri
   const [dateRange, setDateRange] = useState([null, null]);
   const [startDate, endDate] = dateRange;
   const [previewPrice, setPreviewPrice] = useState({ base: 0, deposit: 0, total: 0 });
@@ -40,7 +39,6 @@ const ItemDetail = () => {
   const [offerDates, setOfferDates] = useState({ start_date: "", end_date: "" });
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
 
-  // 🚩 YENİ: Şikayet (Report) State'leri
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportForm, setReportForm] = useState({ reason: "", description: "", proof_image: null });
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
@@ -97,6 +95,9 @@ const ItemDetail = () => {
     }
   }, [offerDates.start_date, offerDates.end_date, item]);
 
+  // Dolu günleri parse etme
+  const excludedIntervals = item?.booked_dates?.map((range) => ({ start: parseISO(range.start), end: parseISO(range.end) })) || [];
+
   const nextImage = (e) => {
     if (e) e.stopPropagation();
     if (!item?.images || item.images.length === 0) return;
@@ -109,14 +110,20 @@ const ItemDetail = () => {
     setCurrentImgIndex((prev) => (prev - 1 + item.images.length) % item.images.length);
   };
 
-  const handleFavoriteToggle = async () => {
+  const requireAuth = (message) => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
     if (!token) {
-      toast.fire({ icon: "info", title: "Favoriye eklemek için giriş yapmalısınız." });
-      return window.scrollTo({ top: 0, behavior: "smooth" });
+      toast.fire({ icon: "info", title: message });
+      navigate(`/login?next=/listings/${id}`);
+      return false;
     }
+    return true;
+  };
+
+  const handleFavoriteToggle = async () => {
+    if (!requireAuth("Favoriye eklemek için giriş yapmalısınız.")) return;
     try {
-      await itemApi.toggleFavorite(item.id, token);
+      await itemApi.toggleFavorite(item.id);
       setIsFavorite(!isFavorite);
     } catch (err) {}
   };
@@ -138,8 +145,7 @@ const ItemDetail = () => {
   };
 
   const handleStartChat = async () => {
-    const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-    if (!token) return toast.fire({ icon: "info", title: "Satıcıya mesaj atmak için giriş yapmalısınız." });
+    if (!requireAuth("Satıcıya mesaj atmak için giriş yapmalısınız.")) return;
     if (currentUserId === item.owner) return toast.fire({ icon: "warning", title: "Kendi ilanınıza mesaj gönderemezsiniz." });
 
     try {
@@ -158,6 +164,23 @@ const ItemDetail = () => {
     e.preventDefault();
     if (!offerPrice || !offerDates.start_date || !offerDates.end_date)
       return toast.fire({ icon: "warning", title: "Lütfen eksiksiz girin." });
+
+    // 🎯 ÇÖZÜM 7: TEKLİFTE TAKVİM KORUMASI (Dolu günleri seçemez)
+    const isOverlap = excludedIntervals.some((interval) => {
+      const oStart = new Date(offerDates.start_date);
+      const oEnd = new Date(offerDates.end_date);
+      oStart.setHours(0, 0, 0, 0);
+      oEnd.setHours(0, 0, 0, 0);
+      const iStart = new Date(interval.start);
+      const iEnd = new Date(interval.end);
+      iStart.setHours(0, 0, 0, 0);
+      iEnd.setHours(0, 0, 0, 0);
+      return oStart <= iEnd && oEnd >= iStart;
+    });
+
+    if (isOverlap) {
+      return toast.fire({ icon: "error", title: "Seçtiğiniz tarihlerde ürün dolu! Lütfen takvimdeki müsait günleri seçin." });
+    }
 
     setIsSubmittingOffer(true);
     try {
@@ -187,7 +210,6 @@ const ItemDetail = () => {
     }
   };
 
-  // 🚩 YENİ: Şikayet Gönderme İşlemi
   const handleReportSubmit = async (e) => {
     e.preventDefault();
     if (!reportForm.reason) return toast.fire({ icon: "warning", title: "Lütfen bir şikayet sebebi seçin." });
@@ -195,11 +217,8 @@ const ItemDetail = () => {
     setIsSubmittingReport(true);
     try {
       const formData = new FormData();
-      formData.append("target_type", "item"); // Veya 'user'
-
-      // BURAYA DİKKAT: item.id veya store.id'nin gerçekten dolu olduğundan emin ol!
+      formData.append("target_type", "item");
       formData.append("item_id", item.id);
-
       formData.append("reason", reportForm.reason);
       formData.append("description", reportForm.description);
       if (reportForm.proof_image) {
@@ -211,10 +230,6 @@ const ItemDetail = () => {
       setIsReportModalOpen(false);
       setReportForm({ reason: "", description: "", proof_image: null });
     } catch (err) {
-      // 🎯 BURAYI DEĞİŞTİRDİK:
-      console.error("ŞİKAYET HATASI DETAYI:", err.response?.data);
-
-      // Backend'den gelen özel bir hata mesajı varsa onu göster, yoksa varsayılanı göster
       const errorMsg = err.response?.data?.error || "Şikayet gönderilirken bir hata oluştu.";
       toast.fire({ icon: "error", title: errorMsg });
     } finally {
@@ -229,10 +244,7 @@ const ItemDetail = () => {
       </div>
     );
   if (!item) return <div className="w-full relative text-center pt-20 text-slate-500 font-mono">Ürün bulunamadı.</div>;
-
   const activeImage = item.images?.[currentImgIndex]?.image || "";
-  const excludedIntervals = item?.booked_dates?.map((range) => ({ start: parseISO(range.start), end: parseISO(range.end) })) || [];
-
   return (
     <div className="w-full relative selection:bg-blue-500/30">
       <div className="p-6 lg:p-12">
@@ -286,7 +298,7 @@ const ItemDetail = () => {
                 </div>
               </div>
 
-              {/* Harita Bölümü */}
+              {/* Harita */}
               <div className="space-y-4 pt-4 border-t border-slate-700/50">
                 <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">🗺️ Konum Bilgisi</h2>
                 {(item.region || item.full_address) && (
@@ -326,7 +338,7 @@ const ItemDetail = () => {
                 </div>
               </div>
 
-              {/* Yorumlar Bölümü */}
+              {/* Yorumlar */}
               <div className="space-y-4 pt-4 border-t border-slate-700/50 mt-6">
                 <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">⭐ Ürün Değerlendirmeleri</h2>
                 {item.reviews && item.reviews.length > 0 ? (
@@ -372,7 +384,6 @@ const ItemDetail = () => {
                     ⚡ {item.category_detail?.name || "Kategori"}
                   </span>
                 </div>
-
                 <h1 className="text-2xl font-black tracking-tight text-slate-100">{item.title}</h1>
 
                 <div className="flex gap-3">
@@ -435,7 +446,7 @@ const ItemDetail = () => {
                           : `@${item.owner_username || "Kullanici"}`}
                       </h3>
                       <div className="flex items-center gap-1 text-[11px] text-amber-400 font-semibold mt-0.5">
-                        ⭐ {item.owner_rating > 0 ? item.owner_rating : "Yeni"}
+                        ⭐ {item.owner_rating > 0 ? item.owner_rating : "Yeni"}{" "}
                         <span className="text-slate-500 font-normal text-[10px]">({item.owner_review_count || 0})</span>
                       </div>
                     </div>
@@ -450,13 +461,11 @@ const ItemDetail = () => {
                   </button>
                   <button
                     onClick={() => {
-                      const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-                      if (!token) return toast.fire({ icon: "info", title: "Teklif vermek için giriş yapmalısınız." });
+                      if (!requireAuth("Teklif vermek için giriş yapmalısınız.")) return;
                       if (currentUserId === item.owner)
                         return toast.fire({ icon: "warning", title: "Kendi ilanınıza teklif veremezsiniz." });
-                      if (startDate && endDate) {
+                      if (startDate && endDate)
                         setOfferDates({ start_date: startDate.toISOString().split("T")[0], end_date: endDate.toISOString().split("T")[0] });
-                      }
                       setIsOfferModalOpen(true);
                     }}
                     className="btn-gradient !bg-amber-500 !border-amber-500 flex items-center justify-center gap-2 py-3 shadow-lg hover:scale-[1.02] active:scale-95 transition-all">
@@ -469,12 +478,9 @@ const ItemDetail = () => {
               <div className="cyber-card p-6 space-y-4">
                 <h2 className="text-xs font-bold tracking-widest text-slate-300 uppercase font-mono">📅 Müsaitlik Durumu</h2>
                 <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[11px] text-blue-300">
-                  ℹ️ Tarih seçerek fiyat tahmini alabilir ve satıcıya teklif gönderebilirsiniz.
+                  ℹ️ Tarih seçerek fiyat tahmini alabilir ve teklif gönderebilirsiniz.
                 </div>
                 <div className="w-full bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block text-center">
-                    Kiralamak İstediğiniz Tarihler
-                  </label>
                   <DatePicker
                     selectsRange={true}
                     startDate={startDate}
@@ -506,8 +512,7 @@ const ItemDetail = () => {
                       </div>
                       <button
                         onClick={() => {
-                          const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-                          if (!token) return toast.fire({ icon: "info", title: "Giriş yapmalısınız." });
+                          if (!requireAuth("Teklif vermek için giriş yapmalısınız.")) return;
                           if (currentUserId === item.owner)
                             return toast.fire({ icon: "warning", title: "Kendi ilanınıza teklif veremezsiniz." });
                           setOfferDates({
@@ -524,12 +529,11 @@ const ItemDetail = () => {
                 </AnimatePresence>
               </div>
 
-              {/* 🚩 YENİ: İLANI ŞİKAYET ET BUTONU */}
+              {/* ŞİKAYET ET BUTONU */}
               <div className="text-center pt-2">
                 <button
                   onClick={() => {
-                    const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-                    if (!token) return toast.fire({ icon: "info", title: "Şikayet etmek için giriş yapmalısınız." });
+                    if (!requireAuth("Şikayet etmek için giriş yapmalısınız.")) return;
                     setIsReportModalOpen(true);
                   }}
                   className="text-[10px] text-slate-500 font-bold hover:text-rose-500 transition-colors underline decoration-dashed underline-offset-4">
@@ -540,7 +544,7 @@ const ItemDetail = () => {
           </div>
         </div>
 
-        {/* 🚩 İLAN ŞİKAYET MODALI */}
+        {/* MODALLAR */}
         <AnimatePresence>
           {isReportModalOpen && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -550,22 +554,20 @@ const ItemDetail = () => {
                 exit={{ scale: 0.9, opacity: 0 }}
                 className="cyber-card p-6 w-full max-w-sm border border-rose-500/30 shadow-2xl shadow-rose-500/10">
                 <h3 className="text-lg font-black text-rose-400 mb-1">🚩 İlanı Şikayet Et</h3>
-                <p className="text-[10px] text-slate-400 mb-6">Bu ilanın kurallarımızı ihlal ettiğini düşünüyorsanız yönetime bildirin.</p>
-                <form onSubmit={handleReportSubmit} className="space-y-4">
+                <form onSubmit={handleReportSubmit} className="space-y-4 mt-4">
                   <div className="space-y-1">
                     <label className="text-[10px] uppercase font-bold text-slate-400">Şikayet Sebebi</label>
                     <select
                       required
                       value={reportForm.reason}
                       onChange={(e) => setReportForm({ ...reportForm, reason: e.target.value })}
-                      className="cyber-input w-full text-xs cursor-pointer focus:border-rose-500">
+                      className="cyber-input w-full text-xs focus:border-rose-500">
                       <option value="" disabled>
                         Sebep Seçin...
                       </option>
                       <option value="Sahte Ürün / Dolandırıcılık">Sahte Ürün / Dolandırıcılık Şüphesi</option>
                       <option value="Yanıltıcı Görsel / Açıklama">Yanıltıcı Görsel veya Açıklama</option>
                       <option value="Uygunsuz İçerik">Uygunsuz / Yasadışı İçerik</option>
-                      <option value="Yanlış Kategori / Fiyat">Yanlış Kategori veya Fiyat Manipülasyonu</option>
                       <option value="Diğer">Diğer</option>
                     </select>
                   </div>
@@ -573,22 +575,19 @@ const ItemDetail = () => {
                     <label className="text-[10px] uppercase font-bold text-slate-400">Detaylı Açıklama (Opsiyonel)</label>
                     <textarea
                       rows="3"
-                      placeholder="Yöneticilerin incelemesine yardımcı olacak detaylar..."
                       value={reportForm.description}
                       onChange={(e) => setReportForm({ ...reportForm, description: e.target.value })}
                       className="cyber-input w-full text-xs focus:border-rose-500 resize-none"></textarea>
                   </div>
-
                   <div className="space-y-1">
-                    <label className="text-[10px] uppercase font-bold text-slate-400">Kanıt Görseli Ekleyin (İsteğe Bağlı, Max 1)</label>
+                    <label className="text-[10px] uppercase font-bold text-slate-400">Kanıt Görseli Ekleyin</label>
                     <input
                       type="file"
                       accept="image/*"
                       onChange={(e) => setReportForm({ ...reportForm, proof_image: e.target.files[0] })}
-                      className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-500/10 file:text-blue-400 hover:file:bg-blue-500/20 cursor-pointer"
+                      className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:bg-blue-500/10 file:text-blue-400 hover:file:bg-blue-500/20 cursor-pointer"
                     />
                   </div>
-
                   <div className="flex gap-3 pt-2">
                     <button
                       type="button"
@@ -599,8 +598,8 @@ const ItemDetail = () => {
                     <button
                       type="submit"
                       disabled={isSubmittingReport}
-                      className="btn-gradient flex-1 !bg-rose-600 !border-rose-500 hover:scale-105 active:scale-95 transition-transform disabled:opacity-50">
-                      {isSubmittingReport ? "İletiliyor..." : "Gönder"}
+                      className="btn-gradient flex-1 !bg-rose-600 !border-rose-500 hover:scale-105 active:scale-95">
+                      Gönder
                     </button>
                   </div>
                 </form>
@@ -609,7 +608,6 @@ const ItemDetail = () => {
           )}
         </AnimatePresence>
 
-        {/* TEKLİF VER MODALI (Aynı kaldı) */}
         <AnimatePresence>
           {isOfferModalOpen && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -619,13 +617,10 @@ const ItemDetail = () => {
                 exit={{ scale: 0.9, opacity: 0 }}
                 className="cyber-card p-6 w-full max-w-sm border border-amber-500/30 shadow-2xl">
                 <h3 className="text-lg font-black text-slate-100 mb-1">🤝 Özel Teklif Ver</h3>
-                <p className="text-[10px] text-slate-400 mb-6">
-                  Tarihleri ve bütçenizi girin. Satıcı onaylarsa chat üzerinden doğrudan ödeme yapabileceksiniz.
-                </p>
-                <form onSubmit={handleSendOffer} className="space-y-4">
+                <form onSubmit={handleSendOffer} className="space-y-4 mt-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 cursor-default">Başlangıç</label>
+                      <label className="text-[10px] uppercase font-bold text-slate-400">Başlangıç</label>
                       <input
                         type="date"
                         required
@@ -636,7 +631,7 @@ const ItemDetail = () => {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 cursor-default">Bitiş</label>
+                      <label className="text-[10px] uppercase font-bold text-slate-400">Bitiş</label>
                       <input
                         type="date"
                         required
@@ -654,7 +649,6 @@ const ItemDetail = () => {
                       type="number"
                       required
                       min="1"
-                      placeholder="Örn: 500"
                       value={offerPrice}
                       onChange={(e) => setOfferPrice(e.target.value)}
                       className="cyber-input w-full text-base font-bold focus:border-amber-500"
@@ -670,7 +664,7 @@ const ItemDetail = () => {
                     <button
                       type="submit"
                       disabled={isSubmittingOffer}
-                      className="btn-gradient flex-1 !bg-amber-500 !border-amber-400 hover:scale-105 active:scale-95 transition-transform disabled:opacity-50">
+                      className="btn-gradient flex-1 !bg-amber-500 !border-amber-400 hover:scale-105 active:scale-95">
                       {isSubmittingOffer ? "Gönderiliyor..." : "Teklifi Gönder"}
                     </button>
                   </div>
@@ -680,7 +674,6 @@ const ItemDetail = () => {
           )}
         </AnimatePresence>
 
-        {/* LIGHTBOX (Aynı kaldı) */}
         <AnimatePresence>
           {isLightboxOpen && (
             <motion.div
@@ -698,35 +691,28 @@ const ItemDetail = () => {
                 KAPAT [ESC]
               </button>
               {item.images?.length > 1 && (
-                <button
-                  onClick={prevImage}
-                  className="absolute left-4 sm:left-12 z-20 bg-slate-800/50 text-white p-4 sm:p-5 rounded-full hover:bg-blue-500/50 border border-slate-600/50">
-                  <span className="text-xl">◀</span>
-                </button>
-              )}
-              {item.images?.length > 1 && (
-                <button
-                  onClick={nextImage}
-                  className="absolute right-4 sm:right-12 z-20 bg-slate-800/50 text-white p-4 sm:p-5 rounded-full hover:bg-blue-500/50 border border-slate-600/50">
-                  <span className="text-xl">▶</span>
-                </button>
+                <>
+                  <button
+                    onClick={prevImage}
+                    className="absolute left-4 sm:left-12 z-20 bg-slate-800/50 text-white p-4 sm:p-5 rounded-full hover:bg-blue-500/50 border border-slate-600/50">
+                    <span className="text-xl">◀</span>
+                  </button>
+                  <button
+                    onClick={nextImage}
+                    className="absolute right-4 sm:right-12 z-20 bg-slate-800/50 text-white p-4 sm:p-5 rounded-full hover:bg-blue-500/50 border border-slate-600/50">
+                    <span className="text-xl">▶</span>
+                  </button>
+                </>
               )}
               <motion.img
                 key={currentImgIndex}
                 initial={{ opacity: 0.5, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
                 src={activeImage}
-                alt="fullscreen"
-                className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl border border-slate-800 cursor-default relative z-10"
+                className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl cursor-default relative z-10"
                 onClick={(e) => e.stopPropagation()}
               />
-              {item.images?.length > 1 && (
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-700/50 text-slate-300 font-mono text-xs z-20">
-                  {currentImgIndex + 1} / {item.images.length}
-                </div>
-              )}
             </motion.div>
           )}
         </AnimatePresence>

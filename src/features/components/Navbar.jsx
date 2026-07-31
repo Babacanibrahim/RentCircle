@@ -292,7 +292,19 @@ const Navbar = ({ onLocationFilter }) => {
     toast.fire({ icon: "success", title: "Konum filtreniz uygulandı." });
   };
 
-  const getNotificationStyle = (type, avatar) => {
+  const getNotificationStyle = (type, message, avatar) => {
+    // 🎯 ÇÖZÜM: Eğer mesaj içinde bu kelimeler varsa, "Tehlike" yerine "Başarı/Yeşil Onay" ikonunu kullan.
+    const lowerMsg = (message || "").toLowerCase();
+    const isSuccess = lowerMsg.includes("onaylandı") || lowerMsg.includes("tebrikler") || lowerMsg.includes("başarıyla");
+
+    if (isSuccess) {
+      return {
+        icon: "✅",
+        bg: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+        path: type === "booking" ? "/bookings" : "/history",
+      };
+    }
+
     switch (type) {
       case "wallet":
         return { icon: "💸", bg: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", path: "/wallet" };
@@ -450,7 +462,7 @@ const Navbar = ({ onLocationFilter }) => {
                           ) : (
                             <>
                               {notifications.map((notif) => {
-                                const style = getNotificationStyle(notif.notification_type, notif.sender_avatar);
+                                const style = getNotificationStyle(notif.notification_type, notif.message, notif.sender_avatar);
                                 return (
                                   <Link
                                     key={notif.id}

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { authApi } from "../services/authApi";
 import { toast } from "../../../utils/alerts";
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [loginInput, setLoginInput] = useState("");
@@ -17,27 +18,22 @@ const Login = () => {
     const isActivated = searchParams.get("activated");
     if (isActivated === "true") {
       toast.fire({ icon: "success", title: "Hesabınız başarıyla aktifleştirildi, giriş yapabilirsiniz." });
-      setSearchParams({});
+      searchParams.delete("activated");
+      setSearchParams(searchParams);
     } else if (isActivated === "false") {
       toast.fire({ icon: "error", title: "Aktivasyon linki geçersiz veya süresi dolmuş." });
-      setSearchParams({});
+      searchParams.delete("activated");
+      setSearchParams(searchParams);
     }
   }, [searchParams, setSearchParams]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    const payload = {
-      email: loginInput.trim(),
-      username: loginInput.trim(),
-      password: password,
-    };
+    const payload = { email: loginInput.trim(), username: loginInput.trim(), password };
 
     try {
-      // 1. Sadece login ol ve tokenları al (Henüz localStorage'a YAZMA!)
       const data = await authApi.login(payload);
 
-      // 2. Token'ı kullanarak profili gizlice çek
       let isStaff = false;
       try {
         const userProfile = await authApi.getProfile(data.access);
@@ -48,7 +44,6 @@ const Login = () => {
         console.error("Profil çekilemedi, normal kullanıcı varsayılıyor.", profileErr);
       }
 
-      // 3. Admin mi Normal mi olduğunu öğrendik. Şimdi temizlik yap ve kaydet.
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
       sessionStorage.removeItem("access_token");
@@ -59,18 +54,16 @@ const Login = () => {
 
       toast.fire({ icon: "success", title: "Giriş başarılı! Yönlendiriliyorsunuz..." });
 
-      // 4. Toast mesajının görünmesi için çok kısa bir süre bekleyip anında ışınlıyoruz!
+      // 🎯 ÇÖZÜM: Geldiği yeri hatırla ve oraya fırlat!
       setTimeout(() => {
-        if (isStaff) {
-          window.location.href = "/admin-dashboard";
-        } else {
-          window.location.href = "/dashboard";
+        let nextUrl = searchParams.get("next") || location.state?.from?.pathname || location.state?.from;
+        if (!nextUrl) {
+          nextUrl = isStaff ? "/admin-dashboard" : "/dashboard";
         }
+        window.location.href = nextUrl;
       }, 500);
     } catch (err) {
-      console.error("Giriş Hatası Detayı:", err.response?.data);
       let errMsg = "Giriş yapılamadı. Lütfen bilgilerinizi kontrol edin.";
-
       if (err.response?.data) {
         if (err.response.data.detail === "No active account found with the given credentials") {
           errMsg = "Şifre hatalı veya e-posta adresiniz henüz onaylanmamış olabilir.";
@@ -80,7 +73,6 @@ const Login = () => {
           errMsg = err.response.data.detail || errMsg;
         }
       }
-
       toast.fire({ icon: "error", title: errMsg });
     }
   };
