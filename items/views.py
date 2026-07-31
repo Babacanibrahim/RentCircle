@@ -257,7 +257,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 user=booking.renter,
                 sender=booking.item.owner,
                 item=booking.item,
-                notification_type='system',
+                notification_type='booking',
                 reference_id=str(booking.id),
                 message=f"Tebrikler! '{booking.item.title}' kiralama talebiniz satıcı tarafından onaylandı."
             )
@@ -727,17 +727,36 @@ class ReviewViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         booking = serializer.validated_data['booking']
+        user = self.request.user
         
-        if self.request.user != booking.renter:
-            raise serializers.ValidationError({"error": "Sadece eşyayı kiralayan kişi yorum yapabilir."})
+        # 1. Yetki Kontrolü: Sadece işleme taraf olan kişiler yorum yapabilir
+        if user not in [booking.renter, booking.item.owner]:
+            raise serializers.ValidationError({"error": "Sadece bu kiralama işlemine taraf olan kişiler değerlendirme yapabilir."})
             
-        if Review.objects.filter(booking=booking).exists():
-            raise serializers.ValidationError({"error": "Bu kiralama işlemi için zaten bir değerlendirme yaptınız."})
+        if booking.status != 'completed':
+            raise serializers.ValidationError({"error": "Sadece tamamlanmış işlemler için değerlendirme yapılabilir."})
+            
+        # 2. Çift Yorum Engeli
+        if Review.objects.filter(booking=booking, reviewer=user).exists():
+            raise serializers.ValidationError({"error": "Bu işlem için zaten bir değerlendirme yaptınız."})
+
+        # 🎯 3. HEDEFİ BUL (SİHİRLİ KISIM): Kiracıysa Satıcıyı, Satıcıysa Kiracıyı hedefler!
+        target_user = booking.item.owner if user == booking.renter else booking.renter
 
         serializer.save(
-            reviewer=self.request.user,
+            reviewer=user,
+            target_user=target_user,
+            item=booking.item
+        )
+        
+        # 4. Bildirim Gönder
+        Notification.objects.create(
+            user=target_user,
+            sender=user,
             item=booking.item,
-            owner=booking.item.owner
+            notification_type='review',
+            reference_id=str(booking.id),
+            message=f"'{booking.item.title}' kiralama işlemi için {user.first_name} profilinize yeni bir değerlendirme bıraktı."
         )
 
 @api_view(['GET', 'PATCH'])

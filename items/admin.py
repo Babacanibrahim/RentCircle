@@ -76,6 +76,6 @@ class MessageAdmin(ModelAdmin):
 
 @admin.register(Review)
 class ReviewAdmin(ModelAdmin):
-    list_display = ('item', 'reviewer', 'owner', 'rating', 'created_at')
+    list_display = ('item', 'reviewer', 'target_user', 'rating', 'created_at')
     list_filter = ('rating', 'created_at')
     search_fields = ('item__title', 'reviewer__first_name', 'comment')

@@ -67,16 +67,18 @@ class ReviewSerializer(serializers.ModelSerializer):
     
     item_title = serializers.CharField(source='item.title', read_only=True)
     item_image = serializers.SerializerMethodField()
+    target_username = serializers.CharField(source='target_user.username', read_only=True) # YENİ
     
     class Meta:
         model = Review
         fields = [
             'id', 'booking', 'item', 'item_title', 'item_image', 
             'reviewer', 'reviewer_username', 'reviewer_show_name', 
-            'reviewer_first_name', 'reviewer_last_name', 'owner', 
+            'reviewer_first_name', 'reviewer_last_name', 
+            'target_user', 'target_username', # YENİ
             'rating', 'comment', 'created_at'
         ]
-        read_only_fields = ['reviewer', 'owner', 'item']
+        read_only_fields = ['reviewer', 'target_user', 'item']
 
     def get_item_image(self, obj):
         first_image = obj.item.images.first()
@@ -116,7 +118,7 @@ class ItemSerializer(serializers.ModelSerializer):
     owner_first_name = serializers.ReadOnlyField(source='owner.first_name')
     owner_last_name = serializers.ReadOnlyField(source='owner.last_name')
 
-    reviews = ReviewSerializer(source='review_set', many=True, read_only=True)
+    reviews = serializers.SerializerMethodField()
     
     is_favorite = serializers.SerializerMethodField()
     next_available_date = serializers.SerializerMethodField()
@@ -186,6 +188,12 @@ class ItemSerializer(serializers.ModelSerializer):
             for booking in active_bookings
         ]
 
+    def get_reviews(self, obj):
+        # İlan detay sayfasında sadece "Satıcıya" yapılan yorumlar görünsün (Satıcının kiracıya yaptığı yorum o ilanda görünmesin)
+        request = self.context.get('request')
+        reviews = obj.reviews.filter(target_user=obj.owner)
+        return ReviewSerializer(reviews, many=True, context={'request': request}).data
+
 
 class StoreDetailSerializer(serializers.ModelSerializer):
     active_listings = serializers.SerializerMethodField()
@@ -249,7 +257,11 @@ class BookingSerializer(serializers.ModelSerializer):
         ]
 
     def get_has_review(self, obj):
-        return hasattr(obj, 'review')
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            # 🎯 DEĞİŞİKLİK: hasattr yerine artık filter ile bakıyoruz çünkü ForeignKey oldu
+            return obj.reviews.filter(reviewer=request.user).exists()
+        return False
 
     def get_handover_images(self, obj):
         images = obj.images.filter(image_type='handover')

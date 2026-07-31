@@ -203,10 +203,12 @@ class Message(models.Model):
     
 class Review(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name='review')
+    # 🎯 1. DEĞİŞİKLİK: OneToOne yerine ForeignKey yaptık. Artık hem kiracı hem satıcı yorum atabilir.
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='reviews')
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name='reviews')
     reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews_given')
-    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews_received')
+    # 🎯 2. DEĞİŞİKLİK: "owner" kelimesini "target_user" yaptık ki satıcı da kiracıyı puanlayabilsin.
+    target_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews_received')
     
     rating = models.IntegerField(choices=[(i, i) for i in range(1, 6)]) 
     comment = models.TextField(blank=True, null=True)
@@ -214,9 +216,10 @@ class Review(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        unique_together = ('booking', 'reviewer')
 
     def __str__(self):
-        return f"{self.reviewer.first_name} -> {self.item.title} ({self.rating} Yıldız)"
+        return f"{self.reviewer.first_name} -> {self.target_user.first_name} ({self.rating} Yıldız)"
     
 
 class Notification(models.Model):
@@ -309,7 +312,7 @@ def log_review_creation(sender, instance, created, **kwargs):
         ActivityLog.objects.create(
             user=instance.reviewer, 
             action_type="YORUM YAPTI", 
-            description=f"'{instance.item.title}' adlı ilana {instance.rating} yıldızlı yorum yaptı."
+            description=f"@{instance.target_user.username} kullanıcısına {instance.rating} yıldızlı değerlendirme yaptı."
         )
 
 @receiver(post_save, sender=Booking)
