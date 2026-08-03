@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { walletApi } from "../../auth/services/authApi";
 import { motion } from "framer-motion";
-import { toast } from "../../../utils/alerts"; // 🎯 YENİ: Bildirim kütüphanesi eklendi
+import { toast } from "../../../utils/alerts";
 
 const WalletDashboard = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -13,17 +13,8 @@ const WalletDashboard = () => {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [iban, setIban] = useState("TR");
 
-  useEffect(() => {
-    fetchWallet();
-    const status = searchParams.get("status");
-    if (status === "success") {
-      toast.fire({ icon: "success", title: "Ödeme başarılı! Bakiyeniz cüzdanınıza eklendi." });
-      setSearchParams({}); // 🎯 Sayfa yenilendiğinde tekrar bildirim vermesin diye URL'yi temizler
-    } else if (status === "fail") {
-      toast.fire({ icon: "error", title: "Ödeme işlemi başarısız oldu veya iptal edildi." });
-      setSearchParams({});
-    }
-  }, [searchParams, setSearchParams]);
+  // 🎯 YENİ: WebSocket referansı
+  const wsRef = useRef(null);
 
   const fetchWallet = async () => {
     try {
@@ -35,6 +26,72 @@ const WalletDashboard = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // 1. Sayfa yüklendiğinde Iyzico dönüşlerini (URL parametrelerini) kontrol et
+    const status = searchParams.get("status");
+    if (status === "success") {
+      toast.fire({ icon: "success", title: "Ödeme başarılı! Bakiyeniz cüzdanınıza eklendi." });
+      setSearchParams({});
+    } else if (status === "fail") {
+      toast.fire({ icon: "error", title: "Ödeme işlemi başarısız oldu veya iptal edildi." });
+      setSearchParams({});
+    }
+
+    // 2. Cüzdan verilerini çek
+    fetchWallet();
+
+    // 3. 🎯 CANLI CÜZDAN: WebSocket bağlantısını kur
+    const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+    let pingInterval;
+
+    if (token) {
+      try {
+        const payload = JSON.parse(window.atob(token.split(".")[1]));
+        const userId = String(payload.user_id).toLowerCase();
+
+        const connectWebSocket = () => {
+          const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications/${userId}/`);
+          wsRef.current = ws;
+
+          ws.onopen = () => {
+            pingInterval = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "ping" }));
+              }
+            }, 30000);
+          };
+
+          ws.onmessage = (event) => {
+            const incomingNotif = JSON.parse(event.data);
+            if (incomingNotif.type === "pong") return;
+
+            // Eğer bildirim cüzdanla veya kiralamayla ilgiliyse cüzdanı güncelle (Örn: Admin talebi onayladı, kiralama iptal edildi vs.)
+            if (["wallet", "booking", "system"].includes(incomingNotif.notification_type)) {
+              fetchWallet();
+            }
+          };
+
+          ws.onclose = () => {
+            clearInterval(pingInterval);
+            setTimeout(connectWebSocket, 3000);
+          };
+        };
+
+        connectWebSocket();
+      } catch (e) {
+        console.error("Token işlenemedi", e);
+      }
+    }
+
+    return () => {
+      clearInterval(pingInterval);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
+    };
+  }, [searchParams, setSearchParams]);
 
   const handleDeposit = async (e) => {
     e.preventDefault();

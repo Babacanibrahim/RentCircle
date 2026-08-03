@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import axios from "axios";
 import formattedTurkeyData from "../auth/data/parseData";
 import { itemApi } from "../items/services/itemApi";
-import { authApi } from "../auth/services/authApi";
 import { toast, cyberConfirm } from "../../utils/alerts";
 
 const Navbar = ({ onLocationFilter }) => {
@@ -24,12 +23,15 @@ const Navbar = ({ onLocationFilter }) => {
   const [isNotificationMenuOpen, setIsNotificationMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
-  // GLOBAL ARAMA (SEARCH) STATE'LERİ
+  // GLOBAL ARAMA STATE'LERİ
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const searchContainerRef = useRef(null);
+
+  // 🎯 YENİ: WebSocket Bağlantısını tutacağımız referans
+  const wsRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -72,22 +74,20 @@ const Navbar = ({ onLocationFilter }) => {
     }
   };
 
-  // 🎯 DÜZELTME: MİSAFİR KULLANICI KORUMASI (401 HATASINI ENGELLEME)
   useEffect(() => {
-    let notifInterval;
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+    let userId = null;
+    let pingInterval; // Kalp atışı zamanlayıcısı
 
     if (token) {
       setIsLoggedIn(true);
       try {
-        // Token varsa ID'yi çözümle
         const base64Url = token.split(".")[1];
         const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
         const payload = JSON.parse(window.atob(base64));
-        setCurrentUserId(payload.user_id);
+        userId = payload.user_id;
+        setCurrentUserId(userId);
 
-        // Profil verilerini Axios Instance (Interceptors'a yakalanmamak için standart axios üzerinden) çekmiyoruz
-        // Burayı istersen axiosInstance üzerinden veya standart authApi ile çekebilirsin.
         axios
           .get("http://localhost:8000/api/auth/me/", {
             headers: { Authorization: `Bearer ${token}` },
@@ -115,36 +115,91 @@ const Navbar = ({ onLocationFilter }) => {
               if (onLocationFilter) onLocationFilter({ city: "", district: "" });
             }
           })
-          .catch((err) => {
-            // Eğer profil çekilirken bir sorun olursa misafiri rahatsız etme, sadece konumu sıfırla
+          .catch(() => {
             if (onLocationFilter) onLocationFilter({ city: "", district: "" });
           });
 
-        // 🎯 SADECE TOKEN VARSA (ÜYE İSE) BİLDİRİMLERİ ÇEK!
-        const fetchNotifs = () => {
-          itemApi
-            .getNotifications()
-            .then((data) => setNotifications(data))
-            .catch((err) => {
-              // Sessizce hatayı yakala (Console'u doldurmaya gerek yok)
+        // 1. Önce eski (geçmiş) bildirimleri 1 kere çek
+        itemApi
+          .getNotifications()
+          .then((data) => setNotifications(data))
+          .catch(() => {});
+
+        // 2. 🎯 Otomatik yeniden bağlanan WebSocket Fonksiyonu
+        const connectWebSocket = () => {
+          const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications/${userId}/`);
+          wsRef.current = ws;
+
+          ws.onopen = () => {
+            console.log("🌐 Global Bildirim Tüneli Açıldı.");
+            // Tünel uykuya dalmasın diye 30 saniyede bir ping atıyoruz
+            pingInterval = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "ping" }));
+              }
+            }, 30000);
+          };
+
+          ws.onmessage = (event) => {
+            const incomingNotif = JSON.parse(event.data);
+
+            // Gelen cevap sadece Pong ise ekrana basmadan işlemi sonlandır
+            if (incomingNotif.type === "pong") return;
+
+            // Ekrana havalı bir Toast düşür (Ahmet 10 defa mesaj atsa da ekranda 10 defa Toast çıkar, bu normal ve istenen durumdur)
+            toast.fire({
+              icon: incomingNotif.notification_type === "system" ? "warning" : "info",
+              title: incomingNotif.sender_name !== "Sistem" ? incomingNotif.sender_name : "RentCircle",
+              text: incomingNotif.message,
+              position: "top-end",
+              toast: true,
+              showConfirmButton: false,
+              timer: 4500,
+              timerProgressBar: true,
             });
+
+            // 🎯 YENİ: Zil menüsüne eklerken Spam'ı engelle
+            setNotifications((prev) => {
+              const existingIndex = prev.findIndex((n) => String(n.id) === String(incomingNotif.id));
+
+              if (existingIndex !== -1) {
+                // Eğer bu ID'li bildirim zaten varsa (örneğin aynı sohbet odasının bildirimi güncellendiyse), eskisini silip en üste yenisini koy
+                const newList = [...prev];
+                newList.splice(existingIndex, 1);
+                return [incomingNotif, ...newList];
+              } else {
+                // Eğer tamamen yeni bir ID'li bildirimse, direkt en başa ekle
+                return [incomingNotif, ...prev];
+              }
+            });
+          };
+
+          ws.onclose = () => {
+            console.log("🔴 Bildirim Tüneli Kapandı. 3 Saniye içinde tekrar bağlanıyor...");
+            clearInterval(pingInterval); // Eski zamanlayıcıyı durdur
+            // Bağlantı koparsa 3 saniye sonra otomatik tekrar bağlan
+            setTimeout(connectWebSocket, 3000);
+          };
         };
 
-        fetchNotifs();
-        // 10 saniyede bir bildirim çekme döngüsü SADECE GİRİŞ YAPMIŞ KİŞİLERE çalışacak
-        notifInterval = setInterval(fetchNotifs, 10000);
+        // Fonksiyonu çağırarak tüneli başlat
+        connectWebSocket();
       } catch (e) {
         if (onLocationFilter) onLocationFilter({ city: "", district: "" });
       }
     } else {
-      // 🎯 MİSAFİR KULLANICI İÇİN: Hiçbir API'ye istek atma, sadece default değerleri ayarla
       setIsLoggedIn(false);
       setIsAdmin(false);
       if (onLocationFilter) onLocationFilter({ city: "", district: "" });
     }
 
     return () => {
-      if (notifInterval) clearInterval(notifInterval);
+      // Component kalkarken (örn: çıkış yaparken) tüneli ve döngüyü temizle
+      clearInterval(pingInterval);
+      if (wsRef.current) {
+        wsRef.current.onclose = null; // Bile bile kapattığımız için tekrar bağlanmaya çalışmasını engeller
+        wsRef.current.close();
+      }
     };
   }, [onLocationFilter]);
 
@@ -175,7 +230,7 @@ const Navbar = ({ onLocationFilter }) => {
     if (result.isConfirmed) {
       try {
         await itemApi.deleteNotification(id);
-        setNotifications(notifications.filter((n) => n.id !== id));
+        setNotifications(notifications.filter((n) => String(n.id) !== String(id)));
       } catch (err) {
         toast.fire({ icon: "error", title: "Bildirim silinemedi." });
       }
@@ -293,7 +348,6 @@ const Navbar = ({ onLocationFilter }) => {
   };
 
   const getNotificationStyle = (type, message, avatar) => {
-    // 🎯 ÇÖZÜM: Eğer mesaj içinde bu kelimeler varsa, "Tehlike" yerine "Başarı/Yeşil Onay" ikonunu kullan.
     const lowerMsg = (message || "").toLowerCase();
     const isSuccess = lowerMsg.includes("onaylandı") || lowerMsg.includes("tebrikler") || lowerMsg.includes("başarıyla");
 
@@ -462,7 +516,11 @@ const Navbar = ({ onLocationFilter }) => {
                           ) : (
                             <>
                               {notifications.map((notif) => {
-                                const style = getNotificationStyle(notif.notification_type, notif.message, notif.sender_avatar);
+                                const style = getNotificationStyle(
+                                  notif.notification_type,
+                                  notif.message,
+                                  notif.sender_avatar || notif.sender_name,
+                                );
                                 return (
                                   <Link
                                     key={notif.id}

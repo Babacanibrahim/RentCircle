@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { itemApi } from "../services/itemApi";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, cyberConfirm } from "../../../utils/alerts";
@@ -10,6 +10,9 @@ const BookingsDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("renter");
   const [currentUserId, setCurrentUserId] = useState(null);
+
+  // WebSocket Referansı
+  const wsRef = useRef(null);
 
   // Modal State'leri
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
@@ -23,7 +26,7 @@ const BookingsDashboard = () => {
   const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
   const [disputeReason, setDisputeReason] = useState("");
 
-  // Fotoğraf Önizleme (Lightbox) State'i
+  // Fotoğraf Önizleme
   const [previewImage, setPreviewImage] = useState(null);
 
   const formatReadableDate = (dateString) => {
@@ -90,15 +93,59 @@ const BookingsDashboard = () => {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+    let userId = null;
+    let pingInterval;
+
     if (token) {
       try {
         const payload = JSON.parse(window.atob(token.split(".")[1]));
-        setCurrentUserId(String(payload.user_id).toLowerCase());
+        userId = String(payload.user_id).toLowerCase();
+        setCurrentUserId(userId);
       } catch (e) {
         console.error("Token çözümlenemedi");
       }
     }
+
     fetchBookingsAndOffers();
+
+    // Canlı Ekran Senkronizasyonu (WebSocket)
+    if (userId) {
+      const connectWebSocket = () => {
+        const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications/${userId}/`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "ping" }));
+            }
+          }, 30000);
+        };
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "pong") return;
+
+          // Karşı taraf işlem yaptığında arka planda sessizce listeyi yenile
+          fetchBookingsAndOffers();
+        };
+
+        ws.onclose = () => {
+          clearInterval(pingInterval);
+          setTimeout(connectWebSocket, 3000);
+        };
+      };
+
+      connectWebSocket();
+    }
+
+    return () => {
+      clearInterval(pingInterval);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
+    };
   }, []);
 
   const handlePayPseudoBooking = async (booking) => {
@@ -360,7 +407,6 @@ const BookingsDashboard = () => {
     const ownerId = String(b.item_detail.owner).toLowerCase();
     const isUserRoleMatch = activeTab === "renter" ? renterId === currentUserId : ownerId === currentUserId;
 
-    // 🎯 SADECE DEVAM EDEN İŞLEMLER
     const isActiveStatus = [
       "awaiting_payment",
       "pending_approval",
@@ -400,7 +446,6 @@ const BookingsDashboard = () => {
               <div
                 key={booking.id}
                 className="cyber-card p-5 border border-slate-700/50 flex flex-col md:flex-row md:items-start justify-between gap-6 hover:bg-slate-800/30 transition-colors">
-                {/* SOL: İlan Bilgileri */}
                 <div className="flex items-start gap-4">
                   <Link to={`/listings/${booking.item_detail.id}`} className="shrink-0">
                     <img
@@ -422,7 +467,6 @@ const BookingsDashboard = () => {
                   </div>
                 </div>
 
-                {/* ORTA: Fiyatlar ve Fotoğraf Galerisi */}
                 <div className="text-left md:text-center border-l border-r border-slate-700/50 px-6 max-w-[300px] flex-1 flex flex-col justify-center">
                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Toplam Kiralama</span>
                   <span className="text-lg font-black text-blue-400">₺{booking.total_price}</span>
@@ -474,7 +518,6 @@ const BookingsDashboard = () => {
                   )}
                 </div>
 
-                {/* SAĞ: Aksiyon Butonları (Dinamik) */}
                 <div className="flex flex-col gap-2 min-w-[200px] shrink-0 justify-center">
                   {booking.status === "awaiting_payment" && activeTab === "renter" && (
                     <button

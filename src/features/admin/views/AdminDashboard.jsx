@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { itemApi } from "../../items/services/itemApi";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, cyberConfirm } from "../../../utils/alerts";
@@ -14,6 +14,10 @@ const AdminDashboard = () => {
 
   // URL tab hafızası
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "stats");
+
+  // 🎯 YENİ: Terminal kaydırma referansı
+  const terminalEndRef = useRef(null);
+  const wsRef = useRef(null);
 
   useEffect(() => {
     setSearchParams({ tab: activeTab }, { replace: true });
@@ -46,41 +50,7 @@ const AdminDashboard = () => {
   const [supportModal, setSupportModal] = useState({ isOpen: false, type: null, data: null });
   const [supportReplyText, setSupportReplyText] = useState("");
   const [isReplying, setIsReplying] = useState(false);
-
-  // 🎯 YENİ: Anlaşmazlık fotoğraflarına tıklayınca büyütmek için
   const [previewImage, setPreviewImage] = useState(null);
-
-  const openSupportModal = (type, data) => {
-    setSupportModal({ isOpen: true, type, data });
-    setSupportReplyText("");
-  };
-
-  const handleSendSupportReply = async (e) => {
-    e.preventDefault();
-    if (!supportReplyText.trim()) return toast.fire({ icon: "warning", title: "Lütfen bir mesaj yazın." });
-
-    setIsReplying(true);
-    try {
-      const targetUsername = supportModal.type === "ticket" ? supportModal.data.user_username : supportModal.data.reporter_username;
-      const targetUser = users.find((u) => u.username === targetUsername);
-
-      if (!targetUser) throw new Error("Kullanıcı sistemde bulunamadı.");
-
-      await itemApi.replyToSupport({
-        user_id: targetUser.id,
-        message: supportReplyText,
-        ticket_id: supportModal.type === "ticket" ? supportModal.data.id : null,
-      });
-
-      toast.fire({ icon: "success", title: "Yanıtınız iletildi." });
-      setSupportModal({ isOpen: false, type: null, data: null });
-      fetchAdminData();
-    } catch (error) {
-      toast.fire({ icon: "error", title: "Mesaj gönderilemedi." });
-    } finally {
-      setIsReplying(false);
-    }
-  };
 
   const fetchAdminData = async () => {
     try {
@@ -130,6 +100,92 @@ const AdminDashboard = () => {
   useEffect(() => {
     fetchAdminData();
   }, [searchQuery]);
+
+  // 🎯 YENİ: ADMIN LIVE WEBSOCKET ENTEGRASYONU
+  useEffect(() => {
+    let pingInterval;
+
+    const connectWebSocket = () => {
+      const ws = new WebSocket(`ws://127.0.0.1:8000/ws/admin-feed/`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "pong") return;
+
+        // 1. Terminale log ekle
+        setLogs((prevLogs) => [data, ...prevLogs]);
+
+        // 2. Birisi ilan açtıysa, kiraladıysa veya para yatırdıysa diğer istatistikleri arkaplanda yenile!
+        fetchAdminData();
+      };
+
+      ws.onclose = () => {
+        clearInterval(pingInterval);
+        setTimeout(connectWebSocket, 3000);
+      };
+    };
+
+    if (!isUnauthorized) {
+      connectWebSocket();
+    }
+
+    return () => {
+      clearInterval(pingInterval);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
+    };
+  }, [isUnauthorized]);
+
+  // 🎯 YENİ: Her yeni log geldiğinde terminalin otomatik en alta/başa inmesini istersen (Seçime bağlı)
+  useEffect(() => {
+    if (activeTab === "logs" && terminalEndRef.current) {
+      // Yavaş ve yumuşak bir kaydırma (Hacker hissi için)
+      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs, activeTab]);
+
+  const openSupportModal = (type, data) => {
+    setSupportModal({ isOpen: true, type, data });
+    setSupportReplyText("");
+  };
+
+  const handleSendSupportReply = async (e) => {
+    e.preventDefault();
+    if (!supportReplyText.trim()) return toast.fire({ icon: "warning", title: "Lütfen bir mesaj yazın." });
+
+    setIsReplying(true);
+    try {
+      const targetUsername = supportModal.type === "ticket" ? supportModal.data.user_username : supportModal.data.reporter_username;
+      const targetUser = users.find((u) => u.username === targetUsername);
+
+      if (!targetUser) throw new Error("Kullanıcı sistemde bulunamadı.");
+
+      await itemApi.replyToSupport({
+        user_id: targetUser.id,
+        message: supportReplyText,
+        ticket_id: supportModal.type === "ticket" ? supportModal.data.id : null,
+      });
+
+      toast.fire({ icon: "success", title: "Yanıtınız iletildi." });
+      setSupportModal({ isOpen: false, type: null, data: null });
+      fetchAdminData();
+    } catch (error) {
+      toast.fire({ icon: "error", title: "Mesaj gönderilemedi." });
+    } finally {
+      setIsReplying(false);
+    }
+  };
 
   const executeDeleteAPI = async (type, id) => {
     try {
@@ -917,23 +973,30 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {/* TAB 12: LOGS */}
+          {/* TAB 12: LOGS (HACKER TERMINALI) */}
           {activeTab === "logs" && (
             <div className="bg-slate-800 border border-slate-700 rounded-3xl overflow-hidden shadow-xl">
               <div className="bg-slate-900 border-b border-slate-800 px-5 py-3 text-xs text-slate-400 font-mono flex items-center justify-between">
-                <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                   <span className="text-emerald-400">admin</span>@server:~/logs$ tail -f system.log
                 </div>
               </div>
+              {/* 🎯 Kaydırma için container'a ref verdik */}
               <div className="p-5 h-[600px] overflow-y-auto font-mono text-xs space-y-2 scrollbar-thin scrollbar-thumb-slate-600 text-slate-300">
-                {logs.map((log) => (
-                  <div key={log.id} className="flex gap-4 border-b border-slate-700/50 pb-2 hover:bg-slate-700/30 transition-colors">
-                    <span className="text-slate-500 shrink-0">[{log.created_at_formatted}]</span>
-                    <span className="shrink-0 font-bold w-32 text-blue-400">{log.action_type}</span>
-                    <span className="text-slate-400 w-28 shrink-0">@{log.username}</span>
-                    <span className="text-slate-200 flex-1">{log.description}</span>
-                  </div>
-                ))}
+                {logs
+                  .slice()
+                  .reverse()
+                  .map((log) => (
+                    <div key={log.id} className="flex gap-4 border-b border-slate-700/50 pb-2 hover:bg-slate-700/30 transition-colors">
+                      <span className="text-slate-500 shrink-0">[{log.created_at_formatted}]</span>
+                      <span className="shrink-0 font-bold w-32 text-blue-400">{log.action_type}</span>
+                      <span className="text-slate-400 w-28 shrink-0">@{log.username}</span>
+                      <span className="text-slate-200 flex-1">{log.description}</span>
+                    </div>
+                  ))}
+                {/* 🎯 En alt noktayı belirleyen boş div */}
+                <div ref={terminalEndRef} />
               </div>
             </div>
           )}

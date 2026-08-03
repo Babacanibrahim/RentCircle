@@ -10,7 +10,7 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import axios from "axios";
 
-// 🎯 ÇÖZÜM 7: TAKVİM KISITLAMASI İÇİN İMPORTLAR
+// TAKVİM İMPORTLARI
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { parseISO } from "date-fns";
@@ -65,6 +65,11 @@ const Chat = () => {
   const [currentUserId, setCurrentUserId] = useState(null);
 
   const chatContainerRef = useRef(null);
+  const wsRef = useRef(null);
+
+  // 🎯 GÜNCELLENDİ: Son görülme state'i eklendi
+  const [isPartnerOnline, setIsPartnerOnline] = useState(false);
+  const [partnerLastSeen, setPartnerLastSeen] = useState(null);
 
   const scrollToBottom = (smooth = true) => {
     setTimeout(() => {
@@ -95,16 +100,34 @@ const Chat = () => {
   const [offerDates, setOfferDates] = useState({ start_date: "", end_date: "" });
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
 
-  // 🎯 YENİ: Takvim Seçici için State'ler
+  // TAKVİM STATE'LERİ
   const [dateRange, setDateRange] = useState([null, null]);
   const [startDate, endDate] = dateRange;
   const [activeItemDetails, setActiveItemDetails] = useState(null);
+
+  // 🎯 YENİ: Gelen ISO tarihini metinlere çeviren fonksiyon
+  const formatLastSeen = (isoString) => {
+    if (!isoString) return "Yakın zamanda";
+
+    const lastSeenDate = new Date(isoString);
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - lastSeenDate) / 1000);
+
+    if (diffInSeconds < 60) return "Az önce";
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} dk önce`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} saat önce`;
+
+    const diffInDays = Math.floor(diffInSeconds / 86400);
+    if (diffInDays === 1) return "Dün";
+    if (diffInDays < 7) return `${diffInDays} gün önce`;
+
+    return lastSeenDate.toLocaleDateString("tr-TR");
+  };
 
   useEffect(() => {
     if (!searchQuery.trim()) setSearchResults([]);
   }, [searchQuery]);
 
-  // 🎯 YENİ: Aktif sohbet değiştiğinde, ilanın detaylarını çekip dolu günleri alıyoruz
   useEffect(() => {
     if (activeChat && (activeChat.item_id || activeChat.item)) {
       itemApi
@@ -114,11 +137,9 @@ const Chat = () => {
     }
   }, [activeChat]);
 
-  // Dolu günleri parse et (Gri yapmak için)
   const excludedIntervals =
     activeItemDetails?.booked_dates?.map((range) => ({ start: parseISO(range.start), end: parseISO(range.end) })) || [];
 
-  // 🎯 YENİ: Takvimden gün seçildiğinde fiyatı ve tarihleri güncelle
   useEffect(() => {
     if (startDate && endDate && activeChat?.item_price) {
       const diffTime = Math.abs(endDate - startDate);
@@ -182,34 +203,129 @@ const Chat = () => {
     fetchConversations();
     const interval = setInterval(fetchConversations, 5000);
     return () => clearInterval(interval);
-  }, [searchParams]);
+  }, [searchParams, activeChat]);
+
+  const getPartnerInfo = (chat) => {
+    if (!chat || !currentUserId) return { id: null, name: "Bilinmiyor", role: "Üye" };
+    if (chat.isNew) return { id: null, name: "Satıcı", role: "İlan Sahibi" };
+    const isOwner = String(chat.owner).toLowerCase() === currentUserId;
+    return {
+      id: isOwner ? chat.renter : chat.owner,
+      name: isOwner ? chat.renter_name : chat.owner_name,
+      role: isOwner ? "Kiracı Adayı" : "İlan Sahibi",
+      isOwner: isOwner,
+    };
+  };
+
+  const partner = getPartnerInfo(activeChat);
 
   useEffect(() => {
-    let interval;
-    if (activeChat && !activeChat.isNew) {
-      let currentMsgCount = 0;
-      const fetchMessages = () => {
-        itemApi
-          .getMessages(activeChat.id)
-          .then((data) => {
-            const fetchedMessages = data.results ? data.results : data;
-            setMessages(fetchedMessages);
-            if (fetchedMessages.length > currentMsgCount) {
-              const isFirstLoad = currentMsgCount === 0;
-              currentMsgCount = fetchedMessages.length;
-              scrollToBottom(!isFirstLoad);
-            }
-          })
-          .catch((err) => console.error("Mesajlar güncellenemedi:", err));
+    let isSubscribed = true;
+    let pingInterval;
+    let statusCheckInterval;
+
+    const connectWebSocket = () => {
+      if (!activeChat || activeChat.isNew) return;
+
+      const ws = new WebSocket(`ws://127.0.0.1:8000/ws/chat/${activeChat.id}/`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log(`Oda ${activeChat.id} için gerçek zamanlı bağlantı kuruldu.`);
+
+        // 1. Tüneli hayatta tutmak için Ping (30 sn)
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          }
+        }, 30000);
+
+        // 2. Karşı tarafın Online olup olmadığını sormak için Ping (5 sn)
+        statusCheckInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN && partner.id) {
+            ws.send(JSON.stringify({ type: "check_status", target_user_id: partner.id }));
+          }
+        }, 5000);
+
+        if (partner.id) ws.send(JSON.stringify({ type: "check_status", target_user_id: partner.id }));
       };
 
-      fetchMessages();
-      interval = setInterval(fetchMessages, 3000);
+      ws.onmessage = (event) => {
+        const incomingData = JSON.parse(event.data);
+
+        if (incomingData.type === "pong") return;
+
+        // Son görülme datasını alıyoruz
+        if (incomingData.type === "status_update") {
+          if (isSubscribed) {
+            setIsPartnerOnline(incomingData.is_online);
+            setPartnerLastSeen(incomingData.last_seen);
+          }
+          return;
+        }
+
+        const newMsg = {
+          id: Date.now(),
+          sender: incomingData.sender,
+          content: incomingData.content,
+          is_offer: incomingData.is_offer,
+          offer_price: incomingData.offer_price,
+          offer_start_date: incomingData.offer_start_date,
+          offer_end_date: incomingData.offer_end_date,
+          offer_status: incomingData.offer_status,
+          is_location_share: incomingData.is_location_share,
+          location_lat: incomingData.location_lat,
+          location_lon: incomingData.location_lon,
+          location_address: incomingData.location_address,
+          created_at: new Date().toISOString(),
+        };
+
+        if (isSubscribed) {
+          setMessages((prev) => [...prev, newMsg]);
+          scrollToBottom(true);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket bağlantısı sonlandı. 3 Saniye içinde tekrar deneniyor...");
+        clearInterval(pingInterval);
+        clearInterval(statusCheckInterval);
+        if (isSubscribed) {
+          setTimeout(connectWebSocket, 3000);
+        }
+      };
+    };
+
+    if (activeChat && !activeChat.isNew) {
+      itemApi
+        .getMessages(activeChat.id)
+        .then((data) => {
+          if (isSubscribed) {
+            const fetchedMessages = data.results ? data.results : data;
+            setMessages(fetchedMessages);
+            scrollToBottom(false);
+          }
+        })
+        .catch((err) => console.error("Mesaj geçmişi çekilemedi:", err));
+
+      connectWebSocket();
     } else if (activeChat && activeChat.isNew) {
       setMessages([]);
+      setIsPartnerOnline(false);
+      setPartnerLastSeen(null);
     }
-    return () => clearInterval(interval);
-  }, [activeChat]);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(pingInterval);
+      clearInterval(statusCheckInterval);
+      setIsPartnerOnline(false);
+      setPartnerLastSeen(null);
+      if (wsRef.current && wsRef.current.readyState === 1) {
+        wsRef.current.close();
+      }
+    };
+  }, [activeChat, partner.id]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -227,50 +343,30 @@ const Chat = () => {
         });
         navigate(`/chat?conv_id=${result.conversation_id}`, { replace: true });
       } else {
-        const sentMessage = await itemApi.sendMessage(activeChat.id, { content: messageContent });
-        setMessages((prev) => [...prev, sentMessage]);
-        scrollToBottom(true);
-        const updatedChats = await itemApi.getConversations();
-        setConversations(updatedChats.results ? updatedChats.results : updatedChats);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              sender_id: currentUserId,
+              content: messageContent,
+              is_offer: false,
+              is_location_share: false,
+            }),
+          );
+        } else {
+          toast.fire({ icon: "error", title: "Bağlantı koptu. Lütfen sayfayı yenileyin." });
+        }
       }
     } catch (error) {
-      toast.fire({ icon: "error", title: "Mesajınız iletilemedi. Lütfen bağlantınızı kontrol edin." });
+      toast.fire({ icon: "error", title: "Mesajınız iletilemedi." });
       setNewMessage(messageContent);
     }
-  };
-
-  const handleSearchLocation = async (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    setIsSearching(true);
-    try {
-      const res = await axios.get(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=tr&limit=5`,
-      );
-      setSearchResults(res.data);
-      if (res.data.length === 0) {
-        toast.fire({ icon: "info", title: "Sonuç bulunamadı. Lütfen daha genel bir arama yapın." });
-      }
-    } catch (error) {
-      toast.fire({ icon: "error", title: "Arama yapılırken hata oluştu." });
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const handleSelectSearchResult = (result) => {
-    const lat = parseFloat(result.lat);
-    const lon = parseFloat(result.lon);
-    setMapPosition([lat, lon]);
-    setModalMapCenter([lat, lon]);
-    setLocationAddress(result.name || result.display_name.split(",")[0]);
-    setSearchResults([]);
   };
 
   const handleSendLocation = async () => {
     if (!mapPosition) return toast.fire({ icon: "warning", title: "Lütfen haritadan bir buluşma noktası seçin." });
 
     const payload = {
+      sender_id: currentUserId,
       content: locationNote || "📍 Yeni bir buluşma noktası önerildi.",
       is_location_share: true,
       location_lat: mapPosition[0],
@@ -286,9 +382,9 @@ const Chat = () => {
         const result = await itemApi.sendDirectMessage(payload);
         navigate(`/chat?conv_id=${result.conversation_id}`, { replace: true });
       } else {
-        const sentMessage = await itemApi.sendMessage(activeChat.id, payload);
-        setMessages((prev) => [...prev, sentMessage]);
-        scrollToBottom(true);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify(payload));
+        }
       }
 
       setIsLocationModalOpen(false);
@@ -303,30 +399,12 @@ const Chat = () => {
     }
   };
 
-  const openOfferModal = (specificOffer = null) => {
-    if (specificOffer) {
-      setDateRange([new Date(specificOffer.start), new Date(specificOffer.end)]);
-      setOfferPrice(specificOffer.price);
-    } else {
-      const lastOffer = [...messages].reverse().find((m) => m.is_offer);
-      if (lastOffer) {
-        setDateRange([new Date(lastOffer.offer_start_date), new Date(lastOffer.offer_end_date)]);
-        setOfferPrice(lastOffer.offer_price);
-      } else {
-        setDateRange([null, null]);
-        setOfferPrice("");
-      }
-    }
-    setIsOfferModalOpen(true);
-  };
-
   const handleSendOffer = async (e) => {
     e.preventDefault();
     if (!offerPrice || !offerDates.start_date || !offerDates.end_date) {
       return toast.fire({ icon: "warning", title: "Lütfen takvimden tarihleri ve bütçenizi eksiksiz girin." });
     }
 
-    // 🎯 ÇÖZÜM 7: Teklifin dolu günlerle çakışıp çakışmadığının güvenliği
     const isOverlap = excludedIntervals.some((interval) => {
       const oStart = new Date(offerDates.start_date);
       const oEnd = new Date(offerDates.end_date);
@@ -346,12 +424,14 @@ const Chat = () => {
     setIsSubmittingOffer(true);
     try {
       const payload = {
+        sender_id: currentUserId,
         content: `Size yeni bir fiyat teklifim var: ${formatReadableDate(offerDates.start_date)} - ${formatReadableDate(offerDates.end_date)} arası toplam ${offerPrice} ₺`,
         is_offer: true,
         offer_price: offerPrice,
-        start_date: offerDates.start_date,
-        end_date: offerDates.end_date,
+        offer_start_date: offerDates.start_date,
+        offer_end_date: offerDates.end_date,
         offer_status: "pending",
+        is_location_share: false,
       };
 
       if (activeChat.isNew) {
@@ -359,9 +439,9 @@ const Chat = () => {
         const result = await itemApi.sendDirectMessage(payload);
         navigate(`/chat?conv_id=${result.conversation_id}`, { replace: true });
       } else {
-        const sentMessage = await itemApi.sendMessage(activeChat.id, payload);
-        setMessages((prev) => [...prev, sentMessage]);
-        scrollToBottom(true);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify(payload));
+        }
       }
 
       setIsOfferModalOpen(false);
@@ -412,6 +492,51 @@ const Chat = () => {
     }
   };
 
+  const handleSearchLocation = async (e) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    try {
+      const res = await axios.get(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&countrycodes=tr&limit=5`,
+      );
+      setSearchResults(res.data);
+      if (res.data.length === 0) {
+        toast.fire({ icon: "info", title: "Sonuç bulunamadı. Lütfen daha genel bir arama yapın." });
+      }
+    } catch (error) {
+      toast.fire({ icon: "error", title: "Arama yapılırken hata oluştu." });
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectSearchResult = (result) => {
+    const lat = parseFloat(result.lat);
+    const lon = parseFloat(result.lon);
+    setMapPosition([lat, lon]);
+    setModalMapCenter([lat, lon]);
+    setLocationAddress(result.name || result.display_name.split(",")[0]);
+    setSearchResults([]);
+  };
+
+  const openOfferModal = (specificOffer = null) => {
+    if (specificOffer) {
+      setDateRange([new Date(specificOffer.start), new Date(specificOffer.end)]);
+      setOfferPrice(specificOffer.price);
+    } else {
+      const lastOffer = [...messages].reverse().find((m) => m.is_offer);
+      if (lastOffer) {
+        setDateRange([new Date(lastOffer.offer_start_date), new Date(lastOffer.offer_end_date)]);
+        setOfferPrice(lastOffer.offer_price);
+      } else {
+        setDateRange([null, null]);
+        setOfferPrice("");
+      }
+    }
+    setIsOfferModalOpen(true);
+  };
+
   const handleOfferResponse = async (messageId, action) => {
     try {
       await itemApi.respondToOffer(messageId, action);
@@ -434,20 +559,6 @@ const Chat = () => {
     const date = new Date(dateString);
     return date.toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" });
   };
-
-  const getPartnerInfo = (chat) => {
-    if (!chat || !currentUserId) return { name: "Bilinmiyor", role: "Üye" };
-    if (chat.isNew) return { name: "Satıcı", role: "İlan Sahibi" };
-    const isOwner = String(chat.owner).toLowerCase() === currentUserId;
-    return {
-      id: isOwner ? chat.renter : chat.owner,
-      name: isOwner ? chat.renter_name : chat.owner_name,
-      role: isOwner ? "Kiracı Adayı" : "İlan Sahibi",
-      isOwner: isOwner,
-    };
-  };
-
-  const partner = getPartnerInfo(activeChat);
 
   return (
     <div className="w-full relative h-screen flex flex-col overflow-hidden bg-[#1e293b]">
@@ -533,11 +644,17 @@ const Chat = () => {
               <div className="p-4 border-b border-[#475569]/40 flex items-center justify-between bg-[#0f172a]/40 backdrop-blur-md">
                 <div className="flex items-center gap-4">
                   {activeChat.item_image && (
-                    <Link to={`/listings/${activeChat.item_id || activeChat.item}`} className="shrink-0 block">
+                    <Link to={`/listings/${activeChat.item_id || activeChat.item}`} className="shrink-0 block relative">
                       <img
                         src={activeChat.item_image}
                         alt="ilan"
                         className="w-10 h-10 rounded-md object-cover border border-slate-600/50 hover:scale-110 transition-transform"
+                      />
+                      <div
+                        className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 border-2 border-[#0f172a] rounded-full transition-colors duration-500 ${
+                          isPartnerOnline ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" : "bg-slate-500"
+                        }`}
+                        title={isPartnerOnline ? "Çevrimiçi" : "Çevrimdışı"}
                       />
                     </Link>
                   )}
@@ -554,8 +671,8 @@ const Chat = () => {
                         </span>
                       )}
                     </h3>
-                    <p className="text-[11px] text-slate-400 font-medium mt-1 flex items-center gap-1.5">
-                      👤 Konuştuğun Kişi:
+                    <div className="text-[11px] text-slate-400 font-medium mt-1 flex items-center gap-2">
+                      <span>👤 Konuştuğun Kişi:</span>
                       {!activeChat.isNew ? (
                         <Link
                           to={`/stores/${partner.id}`}
@@ -566,7 +683,12 @@ const Chat = () => {
                         <span className="text-slate-300 cursor-default">{partner.name}</span>
                       )}
                       <span className="text-[9px] bg-slate-700/50 px-1.5 py-0.5 rounded font-mono cursor-default">{partner.role}</span>
-                    </p>
+
+                      <span
+                        className={`text-[10px] font-bold tracking-wider uppercase ml-1 transition-colors duration-500 ${isPartnerOnline ? "text-emerald-400" : "text-slate-500"}`}>
+                        {isPartnerOnline ? "🟢 Çevrimiçi" : `⚪ Son Görülme: ${formatLastSeen(partnerLastSeen)}`}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -593,7 +715,6 @@ const Chat = () => {
                     const isMe = String(msg.sender).toLowerCase() === currentUserId;
                     const isSupport = msg.sender_username === "rentcircle_destek" || msg.sender_name === "RentCircle Destek";
 
-                    // 1️⃣ YENİ ŞIK TEKLİF KARTI
                     if (msg.is_offer) {
                       return (
                         <motion.div
@@ -625,7 +746,7 @@ const Chat = () => {
                               </div>
                             </div>
 
-                            <p className="text-xs text-slate-300 italic mb-4">"{msg.content}"</p>
+                            <p className="text-xs text-slate-300 italic mb-4">&quot;{msg.content}&quot;</p>
 
                             {msg.offer_status === "pending" ? (
                               isMe ? (
@@ -683,7 +804,6 @@ const Chat = () => {
                       );
                     }
 
-                    // 2️⃣ LOKASYON PAYLAŞIM KARTI
                     if (msg.is_location_share) {
                       return (
                         <motion.div
@@ -723,7 +843,7 @@ const Chat = () => {
                               </p>
                             </div>
 
-                            <p className="text-xs text-slate-300 italic mb-4">"{msg.content}"</p>
+                            <p className="text-xs text-slate-300 italic mb-4">&quot;{msg.content}&quot;</p>
 
                             {msg.offer_status === "pending" ? (
                               isMe ? (
@@ -771,7 +891,6 @@ const Chat = () => {
                       );
                     }
 
-                    // 3️⃣ NORMAL MESAJ BALONLARI (RENTCIRCLE DESTEK TASARIMLI)
                     return (
                       <div
                         key={msg.id}
@@ -788,7 +907,6 @@ const Chat = () => {
                                   ? "bg-gradient-to-tr from-blue-600 via-blue-600 to-indigo-600 text-white rounded-br-none border-blue-500/20"
                                   : "bg-[#334155]/80 text-slate-200 rounded-bl-none border-[#475569]/40 backdrop-blur-sm"
                             }`}>
-                            {/* 🎯 EĞER RENTCIRCLE DESTEK İSE RESMİ ROZET GÖSTER */}
                             {isSupport && (
                               <div className="flex items-center gap-2 mb-2 pb-2 border-b border-amber-500/30">
                                 <div className="w-5 h-5 rounded-full bg-amber-500/20 border border-amber-500 text-amber-400 flex items-center justify-center text-[10px] font-black shadow-inner">
@@ -865,7 +983,7 @@ const Chat = () => {
         </div>
       </div>
 
-      {/* 🎯 ÇÖZÜM 7: TEKLİF VER / DÜZENLE MODALI (TAKVİM EKLENDİ) */}
+      {/* TEKLİF MODALI */}
       <AnimatePresence>
         {isOfferModalOpen && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -878,7 +996,6 @@ const Chat = () => {
               <p className="text-[10px] text-slate-400 mb-4 cursor-default">Müsait tarihleri seçin ve tutarı belirleyin.</p>
 
               <form onSubmit={handleSendOffer} className="space-y-4">
-                {/* 📅 TAKVİM BİLEŞENİ */}
                 <div className="w-full bg-slate-900/50 p-2 rounded-xl border border-slate-700/50 flex justify-center scale-90 origin-top">
                   <DatePicker
                     selectsRange={true}
@@ -926,7 +1043,7 @@ const Chat = () => {
         )}
       </AnimatePresence>
 
-      {/* LOKASYON MODALI AYNEN KORUNDU */}
+      {/* LOKASYON MODALI */}
       <AnimatePresence>
         {isLocationModalOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">

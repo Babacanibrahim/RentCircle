@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { itemApi } from "../services/itemApi";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "../../../utils/alerts";
@@ -9,7 +9,9 @@ const RentalHistory = () => {
   const [activeTab, setActiveTab] = useState("renter");
   const [currentUserId, setCurrentUserId] = useState(null);
 
-  // 🎯 ÇİFT TARAFLI DEĞERLENDİRME STATE'LERİ
+  // WebSocket Referansı
+  const wsRef = useRef(null);
+
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [reviewData, setReviewData] = useState({ bookingId: null, rating: 5, comment: "", targetName: "", targetRole: "" });
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
@@ -17,8 +19,6 @@ const RentalHistory = () => {
   const fetchHistory = async () => {
     try {
       const data = await itemApi.getBookings();
-      // Yalnızca bitmiş (completed), iptal edilmiş (rejected) işlemleri listeliyoruz.
-      // Not: 'disputed' genelde aktif bir sorun olduğu için Bookings'de kalması daha iyidir ama tercih senin.
       const pastBookings = data.results || data;
       setHistory(pastBookings.filter((b) => ["completed", "rejected"].includes(b.status)));
     } catch (error) {
@@ -30,18 +30,59 @@ const RentalHistory = () => {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+    let userId = null;
+    let pingInterval;
+
     if (token) {
       try {
         const payload = JSON.parse(window.atob(token.split(".")[1]));
-        setCurrentUserId(String(payload.user_id).toLowerCase());
+        userId = String(payload.user_id).toLowerCase();
+        setCurrentUserId(userId);
       } catch (e) {
         console.error("Token çözülemadi");
       }
     }
+
     fetchHistory();
+
+    // Canlı Ekran Senkronizasyonu (WebSocket)
+    if (userId) {
+      const connectWebSocket = () => {
+        const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications/${userId}/`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "ping" }));
+            }
+          }, 30000);
+        };
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === "pong") return;
+          fetchHistory();
+        };
+
+        ws.onclose = () => {
+          clearInterval(pingInterval);
+          setTimeout(connectWebSocket, 3000);
+        };
+      };
+
+      connectWebSocket();
+    }
+
+    return () => {
+      clearInterval(pingInterval);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+      }
+    };
   }, []);
 
-  // 🎯 DİNAMİK MODAL AÇICI (Kiracı mı Satıcı mı değerlendirilecek?)
   const openReviewModal = (booking) => {
     const isRenter = activeTab === "renter";
     const targetName = isRenter ? booking.item_detail.owner_username : booking.renter_name;
@@ -165,7 +206,6 @@ const RentalHistory = () => {
                 </div>
 
                 <div className="flex flex-col gap-2 min-w-[180px]">
-                  {/* 🎯 SADECE TAMAMLANMIŞ İŞLEMLERDE DEĞERLENDİRME ÇIKAR */}
                   {booking.status === "completed" && !booking.has_review && (
                     <button
                       onClick={() => openReviewModal(booking)}
