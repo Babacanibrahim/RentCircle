@@ -25,6 +25,8 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
+    "channels",
     "unfold",
     'rest_framework',
     'corsheaders',
@@ -68,6 +70,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'core.wsgi.application'
+ASGI_APPLICATION = "core.asgi.application"
 
 
 # Database
@@ -243,3 +246,23 @@ DEFAULT_FROM_EMAIL = 'RentCircle <ibrahimbbcn1907@gmail.com>'
 IYZICO_API_KEY = 'sandbox-Ft87nBAz0FttTk27CVQAkPl8kLYv1Mok'
 IYZICO_SECRET_KEY = 'sandbox-vq6GaNaMITifE38xOInobhdK25VB4MnI'
 IYZICO_BASE_URL = 'sandbox-api.iyzipay.com'
+
+# ==========================================
+# WEBSOCKET / CHANNELS / UPSTASH REDIS
+# ==========================================
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [
+                {
+                    "address": "rediss://default:gQAAAAAAAqtvAAIgcDI1ZTUwZDhjZWRjNmU0MjlkOTJlZGM5ODFiYjVmZjBlZg@legal-mudfish-174959.upstash.io:6379",
+                    "ssl_cert_reqs": None,
+                    "socket_connect_timeout": 10,
+                    "socket_timeout": 30,
+                }
+            ],
+        },
+    },
+}

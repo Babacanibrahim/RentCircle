@@ -9,6 +9,8 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
 from users.models import WalletTransaction
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 class Category(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -408,3 +410,63 @@ class Ticket(models.Model):
 
     def __str__(self):
         return f"Ticket #{str(self.id)[:8]} - {self.user.username} ({self.get_topic_display()})"
+
+
+# -----------------------------------------------------------
+# 🚀 GLOBAL WEBSOCKET BİLDİRİM DAĞITICI (BROADCASTER)
+# -----------------------------------------------------------
+@receiver(post_save, sender=Notification)
+def broadcast_realtime_notification(sender, instance, created, **kwargs):
+
+    if created or not instance.is_read:
+        try:
+            channel_layer = get_channel_layer()
+            group_name = f"user_notifications_{instance.user.id}"
+            
+            # Print atarak terminalde sorunu yakalayacağız
+            print(f"🚀 [WS-SİNYAL] {group_name} grubuna bildirim gönderilmeye çalışılıyor... (Yeni/Güncelleme)")
+            
+            async_to_sync(channel_layer.group_send)(
+                group_name,
+                {
+                    "type": "send_notification",
+                    "data": {
+                        "id": str(instance.id),
+                        "notification_type": instance.notification_type,
+                        "message": instance.message,
+                        "reference_id": str(instance.reference_id),
+                        "created_at": instance.created_at.isoformat(),
+                        "sender_name": instance.sender.first_name if instance.sender else "Sistem",
+                        "is_read": instance.is_read
+                    }
+                }
+            )
+            print("✅ [WS-SİNYAL] Bildirim kanala başarıyla fırlatıldı!")
+        except Exception as e:
+            print(f"❌ [WS-SİNYAL HATASI] Bildirim gönderilirken hata oluştu: {e}")
+
+
+
+@receiver(post_save, sender=ActivityLog)
+def broadcast_admin_live_feed(sender, instance, created, **kwargs):
+    if created:
+        try:
+            channel_layer = get_channel_layer()
+            group_name = "admin_live_feed"
+            
+            # Asenkron olarak admin tüneline fırlat
+            async_to_sync(channel_layer.group_send)(
+                group_name,
+                {
+                    "type": "send_admin_feed",
+                    "data": {
+                        "id": str(instance.id),
+                        "username": instance.user.username,
+                        "action_type": instance.action_type,
+                        "description": instance.description,
+                        "created_at_formatted": instance.created_at.strftime("%d.%m.%Y %H:%M:%S")
+                    }
+                }
+            )
+        except Exception as e:
+            print(f"❌ [ADMIN WS HATASI] Canlı akış gönderilemedi: {e}")
