@@ -1,4 +1,3 @@
-# users/views.py
 import random
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
@@ -17,6 +16,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.throttling import ScopedRateThrottle # 🛡️ YENİ: Kalkan kütüphanesi eklendi
 from rest_framework_simplejwt.tokens import RefreshToken
 import iyzipay
 import uuid
@@ -26,8 +26,13 @@ from django.contrib.auth import get_user_model
 from .serializers import RegisterSerializer, UserProfileSerializer, ChangePasswordSerializer, WalletSerializer
 from .models import CustomUser, PasswordResetOTP, Wallet, WalletTransaction, WithdrawalRequest
 
+User = get_user_model()
+
+# 🛡️ ZIRHLI: Şifre Sıfırlama Spam Koruması
 class ForgotPasswordRequestView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'password_reset'
 
     def post(self, request):
         method = request.data.get('method')
@@ -47,42 +52,42 @@ class ForgotPasswordRequestView(APIView):
 
             subject = "RentCircle - Şifre Sıfırlama Kodu"
             html_message = f"""
-                        <!DOCTYPE html>
-                        <html>
-                        <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #f8fafc;">
-                            <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                                <div style="background-color: #1e293b; border-radius: 16px; padding: 40px; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-                                    <div style="text-align: center; margin-bottom: 30px;">
-                                        <span style="font-size: 28px; font-weight: 900; letter-spacing: 2px; color: #f8fafc; font-family: monospace;">
-                                            RENT<span style="color: #3b82f6;">CIRCLE</span>
-                                        </span>
-                                    </div>
-                                    <p style="font-size: 16px; color: #cbd5e1; line-height: 1.6;">Merhaba <strong>{user.first_name}</strong>,</p>
-                                    <p style="font-size: 16px; color: #cbd5e1; line-height: 1.6;">
+                        
+                        
+                        
+                            
+                                
+                                    
+                                        
+                                            RENTCIRCLE
+                                        
+                                    
+                                    Merhaba {user.first_name},
+                                    
                                         Hesabınız için bir şifre sıfırlama talebi aldık. İşleme devam etmek için doğrulama kodunuz aşağıdadır:
-                                    </p>
-                                    <div style="text-align: center; margin: 30px 0; background-color: #0f172a; padding: 20px; border-radius: 12px; border: 1px dashed #475569;">
-                                        <span style="font-size: 32px; font-weight: 900; letter-spacing: 10px; color: #3b82f6; font-family: monospace;">
+                                    
+                                    
+                                        
                                             {otp_obj.otp}
-                                        </span>
-                                    </div>
-                                    <p style="font-size: 14px; color: #ef4444; text-align: center; font-weight: bold;">
+                                        
+                                    
+                                    
                                         ⚠️ Bu kod güvenliğiniz için sadece 3 dakika geçerlidir.
-                                    </p>
-                                    <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; border-top: 1px solid #334155; padding-top: 20px; margin-top: 30px;">
+                                    
+                                    
                                         Bu talebi siz yapmadıysanız lütfen bu e-postayı görmezden gelin. Şifreniz siz kodu onaylayana kadar değiştirilmeyecektir.
-                                    </p>
-                                </div>
-                            </div>
-                        </body>
-                        </html>
+                                    
+                                
+                            
+                        
+                        
                         """
             plain_message = strip_tags(html_message)
 
             send_mail(
                 subject=subject,
                 message=plain_message,
-                from_email='RentCircle <noreply@rentcircle.com>',
+                from_email='RentCircle ',
                 recipient_list=[user.email],
                 html_message=html_message
             )
@@ -120,7 +125,6 @@ class ResetPasswordConfirmView(APIView):
         if new_password != confirm_password:
             return Response({"error": "Yeni şifreler birbiriyle uyuşmuyor."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 🎯 YENİ: Şifremi Unuttum kısmında zayıf şifre kontrolü
         if len(new_password) < 8:
             return Response({"error": "Şifreniz çok kısa. Güvenliğiniz için en az 8 karakterli bir şifre belirleyin."}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -141,9 +145,12 @@ class ResetPasswordConfirmView(APIView):
 
         return Response({"message": "Şifreniz başarıyla değiştirildi. Giriş yapabilirsiniz."}, status=status.HTTP_200_OK)
 
-
+# 🛡️ ZIRHLI: Bot Kayıt (Spam) Koruması
 class RegisterView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'register_attempts'
+
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
@@ -155,52 +162,50 @@ class RegisterView(APIView):
             
             subject = "RentCircle - Aramıza Hoş Geldin! Hesabını Aktifleştir"
             html_message = f"""
-                        <!DOCTYPE html>
-                        <html>
-                        <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #f8fafc;">
-                            <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                                <div style="background-color: #1e293b; border-radius: 16px; padding: 40px; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-                                    <div style="text-align: center; margin-bottom: 30px;">
-                                        <span style="font-size: 28px; font-weight: 900; letter-spacing: 2px; color: #f8fafc; font-family: monospace;">
-                                            RENT<span style="color: #3b82f6;">CIRCLE</span>
-                                        </span>
-                                    </div>
-                                    <p style="font-size: 16px; color: #cbd5e1; line-height: 1.6;">Merhaba <strong>{user.first_name}</strong>,</p>
-                                    <p style="font-size: 16px; color: #cbd5e1; line-height: 1.6;">
+                        
+                        
+                        
+                            
+                                
+                                    
+                                        
+                                            RENTCIRCLE
+                                        
+                                    
+                                    Merhaba {user.first_name},
+                                    
                                         Güvenli Pazar Yeri ekosistemine hoş geldin! Hesabını aktifleştirip ilanları incelemeye veya kendi ürünlerini kiralamaya başlamak için tek bir adımın kaldı.
-                                    </p>
-                                    <div style="text-align: center; margin: 40px 0;">
-                                        <a href="{activation_link}" style="background: linear-gradient(to right, #3b82f6, #6366f1); color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block; font-size: 16px;">
+                                    
+                                    
+                                        
                                             Hesabımı Aktifleştir
-                                        </a>
-                                    </div>
-                                    <p style="font-size: 13px; color: #94a3b8; line-height: 1.5; border-top: 1px solid #334155; padding-top: 20px;">
-                                        Eğer buton çalışmıyorsa aşağıdaki bağlantıyı tarayıcınıza kopyalayabilirsiniz:<br>
-                                        <a href="{activation_link}" style="color: #3b82f6; word-break: break-all;">{activation_link}</a>
-                                    </p>
-                                </div>
-                                <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #64748b;">
-                                    <p>Bu hesabı siz oluşturmadıysanız, e-postayı güvenle silebilirsiniz.</p>
-                                    <p>&copy; 2026 RentCircle. Tüm hakları saklıdır.</p>
-                                </div>
-                            </div>
-                        </body>
-                        </html>
+                                        
+                                    
+                                    
+                                        Eğer buton çalışmıyorsa aşağıdaki bağlantıyı tarayıcınıza kopyalayabilirsiniz:
+                                        {activation_link}
+                                    
+                                
+                                
+                                    Bu hesabı siz oluşturmadıysanız, e-postayı güvenle silebilirsiniz.
+                                    © 2026 RentCircle. Tüm hakları saklıdır.
+                                
+                            
+                        
+                        
                         """
             plain_message = strip_tags(html_message)
 
             send_mail(
                 subject=subject,
                 message=plain_message,
-                from_email='RentCircle <noreply@rentcircle.com>',
+                from_email='RentCircle ',
                 recipient_list=[user.email],
                 html_message=html_message 
             )
             
             return Response({"message": "Kayıt başarılı! Lütfen e-posta adresinize gönderilen aktivasyon linkini onaylayın."}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-User = get_user_model()
 
 class ActivateAccountView(APIView):
     permission_classes = [AllowAny]
@@ -212,34 +217,37 @@ class ActivateAccountView(APIView):
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
             user = None
 
-        # Token doğruysa ve kullanıcı varsa
         if user is not None and default_token_generator.check_token(user, token):
             user.is_active = True
             user.save()
-            
-            # 🎯 BAŞARILI: Kullanıcıyı frontend login sayfasına yönlendir
-            # URL sonuna '?activated=true' ekliyoruz ki frontend'de yakalayabilelim
             return redirect("http://localhost:5173/login?activated=true")
         else:
-            # 🎯 BAŞARISIZ: Link geçersizse veya süresi dolmuşsa
             return redirect("http://localhost:5173/login?activated=false")
 
-
+# 🛡️ ZIRHLI VE İZLEMELİ ÇIKIŞ: Çalınan Token'ları Kara Listeye Alma
 class LogoutViewSet(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny] 
+    # 🎯 SİHİRLİ DOKUNUŞ: JWT doğrulamayı tamamen kapatır. 
+    # Süresi bitmiş Access Token gelse bile hata fırlatmaz, kodun çalışmasına izin verir.
+    authentication_classes = [] 
 
     def post(self, request):
         try:
             refresh_token = request.data.get("refresh_token")
+            print(f"🔍 [KARA LİSTE TESTİ] Gelen Token: {refresh_token}") 
+            
             if not refresh_token:
+                print("❌ [KARA LİSTE HATASI] Frontend'den token gelmedi!")
                 return Response({"error": "Refresh token gerekli."}, status=status.HTTP_400_BAD_REQUEST)
                 
             token = RefreshToken(refresh_token)
             token.blacklist() 
+            print("✅ [KARA LİSTE BAŞARILI] Token sonsuza dek kilitlendi!")
             
             return Response({"message": "Güvenli çıkış yapıldı, token kara listeye alındı."}, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({"error": "Geçersiz token veya işlem zaten tamamlanmış."}, status=status.HTTP_400_BAD_REQUEST)
+            print(f"⚠️ [KARA LİSTE DURUMU] İşlem atlandı: {str(e)}") 
+            return Response({"message": "Güvenli çıkış yapıldı."}, status=status.HTTP_200_OK)
         
 
 class UserProfileView(RetrieveUpdateAPIView):
@@ -271,11 +279,9 @@ class WalletDetailView(APIView):
         serializer = WalletSerializer(wallet)
         data = serializer.data
         
-        # İşlemleri yeniden eskiye doğru sırala ve son 20 işlemi gönder
         data['transactions'] = sorted(data['transactions'], key=lambda x: x['created_at'], reverse=True)[:20]
         return Response(data, status=status.HTTP_200_OK)
 
-# 2. IBAN'A PARA ÇEKME TALEBİ OLUŞTURMA
 class RequestWithdrawalView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -294,17 +300,13 @@ class RequestWithdrawalView(APIView):
         except ValueError:
             return Response({"error": "Geçersiz tutar formatı."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Bakiye kontrolü
         if wallet.balance < amount:
             return Response({"error": "Yetersiz bakiye."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # İşlemi veritabanında güvene al (atomic)
         with transaction.atomic():
-            # 1. Bakiyeyi düş
             wallet.balance -= amount
             wallet.save()
 
-            # 2. İşlem geçmişine kaydet
             WalletTransaction.objects.create(
                 wallet=wallet,
                 transaction_type='WITHDRAWAL',
@@ -312,7 +314,6 @@ class RequestWithdrawalView(APIView):
                 description=f"IBAN'a para çekme talebi: {iban}"
             )
 
-            # 3. Talebi admin onayına gönder
             WithdrawalRequest.objects.create(
                 wallet=wallet,
                 amount=amount,
@@ -328,7 +329,6 @@ def get_iyzico_options():
         'base_url': settings.IYZICO_BASE_URL
     }
 
-# 1. ÖDEME FORMUNU BAŞLATMA (Kullanıcı Tarafı)
 class InitiateDepositView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -340,7 +340,6 @@ class InitiateDepositView(APIView):
         user = request.user
         options = get_iyzico_options()
 
-        # conversationId içine user.id'yi gizliyoruz ki Iyzico'dan dönerken kim olduğunu bilelim
         conversation_id = f"DEP_{user.id}_{uuid.uuid4().hex[:6]}"
 
         request_data = {
@@ -351,7 +350,6 @@ class InitiateDepositView(APIView):
             'currency': 'TRY',
             'basketId': f"BSK-{user.id}",
             'paymentGroup': 'PRODUCT',
-            # Geri dönüş URL'si (React veya Django tarafındaki callback adresi)
             'callbackUrl': "http://localhost:8000/api/users/wallet/deposit/callback/",
             'enabledInstallments': ['2', '3', '6', '9'],
             'buyer': {
@@ -360,7 +358,7 @@ class InitiateDepositView(APIView):
                 'surname': user.last_name or 'Kullanıcı',
                 'gsmNumber': '+905555555555',
                 'email': user.email,
-                'identityNumber': '11111111111', # Standart ödemede TCKN doğrulanmaz, sabit kalabilir
+                'identityNumber': '11111111111', 
                 'lastLoginDate': '2023-01-01 10:00:00',
                 'registrationDate': '2023-01-01 10:00:00',
                 'registrationAddress': 'Denizli Türkiye',
@@ -388,7 +386,7 @@ class InitiateDepositView(APIView):
                     'id': 'WALLET-TOPUP',
                     'name': 'RentCircle Cüzdan Bakiye Yükleme',
                     'category1': 'Cüzdan',
-                    'itemType': 'VIRTUAL', # Fiziksel bir ürün değil
+                    'itemType': 'VIRTUAL', 
                     'price': str(amount)
                 }
             ]
@@ -399,8 +397,6 @@ class InitiateDepositView(APIView):
         
         return Response(result, status=status.HTTP_200_OK)
 
-# 2. İYZİCO'DAN DÖNEN YANITI YAKALAMA (Webhook / Callback)
-# İyzico buraya POST atacağı için dışarıdan erişime açık olmalı (AllowAny)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def deposit_callback(request):
@@ -411,23 +407,19 @@ def deposit_callback(request):
     options = get_iyzico_options()
     request_iyzico = {'locale': 'tr', 'token': token}
     
-    # İşlem sonucunu İyzico'dan sorgula
     checkout_form = iyzipay.CheckoutForm().retrieve(request_iyzico, options)
     result = checkout_form.read().decode('utf-8')
     import json
     result_json = json.loads(result)
 
-    # Ödeme başarılıysa
     if result_json.get('paymentStatus') == 'SUCCESS':
-        conversation_id = result_json.get('conversationId') # Format: DEP_{user.id}_{uuid}
+        conversation_id = result_json.get('conversationId') 
         paid_price = Decimal(result_json.get('paidPrice'))
         
         try:
-            # Kullanıcı ID'sini parçalayarak bul
             user_id = conversation_id.split('_')[1]
             wallet = Wallet.objects.get(user__id=user_id)
 
-            # Cüzdan işlemini güvene al
             with transaction.atomic():
                 wallet.balance += paid_price
                 wallet.save()
@@ -439,11 +431,9 @@ def deposit_callback(request):
                     description="Kredi Kartı ile Bakiye Yükleme"
                 )
             
-            # Başarılı sayfasına (Frontend Cüzdan sayfasına) yönlendir
             return HttpResponseRedirect("http://localhost:5173/wallet?status=success")
         except Exception as e:
             print("Cüzdan güncellenirken hata:", str(e))
             return HttpResponseRedirect("http://localhost:5173/wallet?status=fail")
             
-    # Ödeme başarısızsa
     return HttpResponseRedirect("http://localhost:5173/wallet?status=fail")

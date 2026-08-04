@@ -13,7 +13,10 @@ from django.db import transaction
 from decimal import Decimal
 from django.contrib.auth import get_user_model
 
-# Kendi app isimlerine göre importları kontrol et
+# 🛡️ YENİ: Hata yakalama kütüphaneleri
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework.exceptions import ValidationError as DRFValidationError
+
 from users.models import Wallet, WalletTransaction, WithdrawalRequest
 from .models import (Category, Item, Booking, Conversation, Message, ItemImage, 
                      BookingImage, Review, Notification, ActivityLog, Report, Ticket)
@@ -51,10 +54,9 @@ class CategoryViewSet(viewsets.ModelViewSet):
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = TicketSerializer
-    parser_classes = (MultiPartParser, FormParser) # Görsel yükleme desteği
+    parser_classes = (MultiPartParser, FormParser) 
 
     def get_queryset(self):
-        # 🎯 ÇÖZÜM: Yönetici (Admin) ise tüm biletleri görsün, değilse sadece kendininkileri
         if self.request.user.is_staff:
             return Ticket.objects.all().order_by('-created_at')
         return Ticket.objects.filter(user=self.request.user).order_by('-created_at')
@@ -89,7 +91,6 @@ class ReportViewSet(viewsets.ViewSet):
             if target_type == 'item':
                 item_id = request.data.get('item_id')
                 if item_id and str(item_id) != "undefined" and str(item_id) != "null":
-                    # ID yerine objenin kendisini çekip atıyoruz
                     item = Item.objects.get(id=item_id)
                     report.reported_item = item
             elif target_type == 'user':
@@ -97,7 +98,9 @@ class ReportViewSet(viewsets.ViewSet):
                 if user_id and str(user_id) != "undefined" and str(user_id) != "null":
                     target_user = User.objects.get(id=user_id)
                     report.reported_user = target_user
-                    
+            
+            # 🛡️ GÜVENLİK YAMASI: Manuel kayıtta X-Ray taramasını zorla çalıştır
+            report.full_clean()
             report.save()
             return Response({"message": "Şikayetiniz alınmıştır."}, status=status.HTTP_201_CREATED)
             
@@ -105,8 +108,11 @@ class ReportViewSet(viewsets.ViewSet):
             return Response({"error": "Şikayet edilmek istenen ilan bulunamadı."}, status=status.HTTP_404_NOT_FOUND)
         except User.DoesNotExist:
             return Response({"error": "Şikayet edilmek istenen kullanıcı bulunamadı."}, status=status.HTTP_404_NOT_FOUND)
+        except DjangoValidationError as e:
+            # X-Ray'den dönen hatayı Frontend'e yansıt
+            error_msg = e.message_dict.get('proof_image', ["Bilinmeyen bir dosya hatası oluştu."])[0]
+            return Response({"error": error_msg}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            # Sistem çökmek yerine hatayı frontend'e düzgünce fırlatacak
             return Response({"error": f"Bir hata oluştu: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -116,7 +122,6 @@ class ItemViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'description', 'category__name']
 
     def get_queryset(self):
-        # 1. Süresi dolan banları kaldır (Otomatik Ban Açıcı)
         expired_bans = Item.objects.filter(is_banned=True, banned_until__lte=timezone.now())
         for item in expired_bans:
             item.is_banned = False
@@ -125,7 +130,6 @@ class ItemViewSet(viewsets.ModelViewSet):
             item.is_available = True
             item.save()
 
-        # 2. Temel Sorgu
         queryset = Item.objects.all().prefetch_related('images').order_by("-created_at")
 
         if self.action == 'list':
@@ -172,7 +176,7 @@ class ItemViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve', 'store_detail']: # store_detail buraya eklendi
+        if self.action in ['list', 'retrieve', 'store_detail']: 
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
@@ -201,9 +205,11 @@ class ItemViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def perform_create(self, serializer):
-        item = serializer.save(owner=self.request.user)
         images = self.request.FILES.getlist('images')
         
+        if not images:
+            raise DRFValidationError({"error": "Güvenlik protokolü gereği en az 1 adet ilan fotoğrafı yüklemelisiniz."})
+
         try:
             main_index = int(self.request.data.get('main_image_index', 0))
         except ValueError:
@@ -212,9 +218,22 @@ class ItemViewSet(viewsets.ModelViewSet):
         if main_index >= len(images):
             main_index = 0
         
-        for index, img in enumerate(images):
-            is_main = True if index == main_index else False
-            ItemImage.objects.create(item=item, image=img, is_main=is_main)
+        # 🛡️ GÜVENLİK YAMASI: İşlemi atomic (ayrılmaz) yapıyoruz. Hata çıkarsa İlan da silinir.
+        with transaction.atomic():
+            item = serializer.save(owner=self.request.user)
+            
+            for index, img in enumerate(images):
+                is_main = True if index == main_index else False
+                
+                # Olayın Kalbi: Dosyayı direkt kaydetmek yerine önce objeyi oluştur
+                image_instance = ItemImage(item=item, image=img, is_main=is_main)
+                try:
+                    # Model katmanındaki X-Ray taramasını zorla çalıştır
+                    image_instance.full_clean() 
+                    image_instance.save()
+                except DjangoValidationError as e:
+                    # Eğer virüs bulursa işlemi iptal edip hatayı fırlat
+                    raise DRFValidationError({"error": e.message_dict.get('image', ["Yüklenen dosya zararlı veya geçersiz!"])[0]})
 
 
 class BookingViewSet(viewsets.ModelViewSet):
@@ -281,15 +300,22 @@ class BookingViewSet(viewsets.ModelViewSet):
         if not images:
             return Response({'error': 'Güvenlik protokolü gereği en az 1 adet durum fotoğrafı yüklemelisiniz.'}, status=status.HTTP_400_BAD_REQUEST)
             
-        for img in images:
-            BookingImage.objects.create(booking=booking, image=img, image_type='handover')
+        # 🛡️ GÜVENLİK YAMASI: Teslimat kanıtları için X-Ray kontrolü
+        with transaction.atomic():
+            for img in images:
+                image_instance = BookingImage(booking=booking, image=img, image_type='handover')
+                try:
+                    image_instance.full_clean()
+                    image_instance.save()
+                except DjangoValidationError as e:
+                    return Response({"error": e.message_dict.get('image', ["Zararlı dosya tespit edildi!"])[0]}, status=status.HTTP_400_BAD_REQUEST)
+                
+            booking.handover_notes = notes
+            booking.status = 'handover_pending'
+            booking.item.is_available = False
+            booking.item.save()
+            booking.save()
             
-        booking.handover_notes = notes
-        booking.status = 'handover_pending'
-        booking.item.is_available = False
-        booking.item.save()
-        booking.save()
-        
         Notification.objects.create(
             user=booking.item.owner,
             notification_type='booking',
@@ -334,12 +360,19 @@ class BookingViewSet(viewsets.ModelViewSet):
         if not images:
             return Response({'error': 'Güvenlik protokolü gereği en az 1 adet iade durumu fotoğrafı yüklemelisiniz.'}, status=status.HTTP_400_BAD_REQUEST)
             
-        for img in images:
-            BookingImage.objects.create(booking=booking, image=img, image_type='return')
-            
-        booking.return_notes = notes
-        booking.status = 'return_pending'
-        booking.save()
+        # 🛡️ GÜVENLİK YAMASI: İade kanıtları için X-Ray kontrolü
+        with transaction.atomic():
+            for img in images:
+                image_instance = BookingImage(booking=booking, image=img, image_type='return')
+                try:
+                    image_instance.full_clean()
+                    image_instance.save()
+                except DjangoValidationError as e:
+                    return Response({"error": e.message_dict.get('image', ["Zararlı dosya tespit edildi!"])[0]}, status=status.HTTP_400_BAD_REQUEST)
+                
+            booking.return_notes = notes
+            booking.status = 'return_pending'
+            booking.save()
         
         Notification.objects.create(
             user=booking.renter,
@@ -587,7 +620,6 @@ class ConversationViewSet(viewsets.ModelViewSet):
             item = get_object_or_404(Item, id=item_id)
             serializer.save(renter=self.request.user, owner=item.owner)
         else:
-            # Sadece ticket mesajlaşması ise owner olarak RentCircle Desteği ata
             system_user, _ = User.objects.get_or_create(username='rentcircle_destek', defaults={'first_name': 'RentCircle', 'last_name': 'Destek', 'is_staff': True})
             serializer.save(renter=self.request.user, owner=system_user)
 
@@ -729,18 +761,15 @@ class ReviewViewSet(viewsets.ModelViewSet):
         booking = serializer.validated_data['booking']
         user = self.request.user
         
-        # 1. Yetki Kontrolü: Sadece işleme taraf olan kişiler yorum yapabilir
         if user not in [booking.renter, booking.item.owner]:
             raise serializers.ValidationError({"error": "Sadece bu kiralama işlemine taraf olan kişiler değerlendirme yapabilir."})
             
         if booking.status != 'completed':
             raise serializers.ValidationError({"error": "Sadece tamamlanmış işlemler için değerlendirme yapılabilir."})
             
-        # 2. Çift Yorum Engeli
         if Review.objects.filter(booking=booking, reviewer=user).exists():
             raise serializers.ValidationError({"error": "Bu işlem için zaten bir değerlendirme yaptınız."})
 
-        # 🎯 3. HEDEFİ BUL (SİHİRLİ KISIM): Kiracıysa Satıcıyı, Satıcıysa Kiracıyı hedefler!
         target_user = booking.item.owner if user == booking.renter else booking.renter
 
         serializer.save(
@@ -749,7 +778,6 @@ class ReviewViewSet(viewsets.ModelViewSet):
             item=booking.item
         )
         
-        # 4. Bildirim Gönder
         Notification.objects.create(
             user=target_user,
             sender=user,
@@ -858,9 +886,6 @@ class PayWithWalletView(APIView):
 
 
 class AdminDashboardViewSet(viewsets.ViewSet):
-    """
-    SADECE YÖNETİCİLERİN (Admin) ERİŞEBİLECEĞİ GOD MODE API'Sİ
-    """
     permission_classes = [IsAdminUser]
 
     @action(detail=False, methods=['get'])
@@ -915,9 +940,6 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         target_user.save()
         return Response({"message": "Kullanıcı başarıyla güncellendi."})
 
-    # ========================================================
-    # 🎯 YENİ 1: CÜZDAN BAKİYESİ EKLE / ÇIKAR (DEKONT MANTIĞI)
-    # ========================================================
     @action(detail=False, methods=['post'])
     def manage_wallet(self, request):
         user_id = request.data.get('user_id')
@@ -947,9 +969,6 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
         return Response({"message": "Bakiye başarıyla güncellendi.", "new_balance": wallet.balance})
 
-    # ========================================================
-    # 🎯 YENİ 2: SÜRELİ & SÜRESİZ BAN İŞLEMİ (KULLANICI/İLAN)
-    # ========================================================
     @action(detail=False, methods=['post'])
     def ban_entity(self, request):
         target_type = request.data.get('target_type') 
@@ -1004,9 +1023,6 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             Notification.objects.create(user=item.owner, notification_type='system', message=msg)
             return Response({"message": "İlan banlandı ve satıcıya bildirildi."})
 
-    # ========================================================
-    # 🎯 YENİ 3: SİSTEM DESTEK HESABINDAN MESAJ ATMA
-    # ========================================================
     @action(detail=False, methods=['post'])
     def reply_to_support(self, request):
         target_user_id = request.data.get('user_id')
@@ -1064,9 +1080,6 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         user.delete()
         return Response({"message": "Kullanıcı silindi."})
 
-    # ========================================================
-    # 🎯 YENİ 4: EKSİK CRUD İŞLEMLERİ (KİRALAMALAR VE YORUMLAR)
-    # ========================================================
     @action(detail=False, methods=['get'])
     def bookings_list(self, request):
         bookings = Booking.objects.select_related('item', 'renter').all().order_by('-created_at')
@@ -1146,7 +1159,6 @@ class AdminDashboardViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'])
     def handle_report(self, request):
-        """Basit rapor kapatma/iptal işlemi (Süreli ban işlemi için artık ban_entity kullanılıyor)"""
         report = get_object_or_404(Report, id=request.data.get('report_id'))
         action_type = request.data.get('action') 
         

@@ -1,6 +1,7 @@
 import uuid
 import string
 import random
+import magic  # 🛡️ YENİ: X-Ray DNA tarayıcısı
 from decimal import Decimal
 from django.db import models
 from django.conf import settings
@@ -8,9 +9,53 @@ from django.contrib.auth import get_user_model
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django.core.exceptions import ValidationError  # 🛡️ YENİ: Model seviyesi hata fırlatıcı
 from users.models import WalletTransaction
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+
+
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: MODEL SEVİYESİ X-RAY DOĞRULAYICILARI
+# ==========================================
+def validate_image_security(file_obj):
+    """Sadece Saf Görsellere (JPG, PNG, WEBP) İzin Verir"""
+    if not file_obj:
+        return
+    try:
+        file_obj.seek(0)
+        file_data = file_obj.read(2048)
+        file_obj.seek(0)
+        
+        mime_type = magic.from_buffer(file_data, mime=True)
+        allowed_mimes = ['image/jpeg', 'image/png', 'image/webp']
+        
+        if mime_type not in allowed_mimes:
+            raise ValidationError(f"🚨 Güvenlik İhlali: Dosyanın uzantısı sahte veya içerik zararlı! (Tespit edilen DNA: {mime_type})")
+    except ValidationError:
+        raise
+    except Exception:
+        raise ValidationError("Dosya güvenlik taramasından geçirilemedi. Lütfen geçerli bir dosya yükleyin.")
+
+def validate_document_security(file_obj):
+    """Destek Talepleri İçin Görsel ve PDF'e İzin Verir"""
+    if not file_obj:
+        return
+    try:
+        file_obj.seek(0)
+        file_data = file_obj.read(2048)
+        file_obj.seek(0)
+        
+        mime_type = magic.from_buffer(file_data, mime=True)
+        allowed_mimes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+        
+        if mime_type not in allowed_mimes:
+            raise ValidationError(f"🚨 Güvenlik İhlali: Yalnızca resim veya PDF yükleyebilirsiniz! (Tespit edilen DNA: {mime_type})")
+    except ValidationError:
+        raise
+    except Exception:
+        raise ValidationError("Dosya güvenlik taramasından geçirilemedi.")
+
 
 class Category(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -58,10 +103,9 @@ class Booking(models.Model):
     STATUS_CHOICES = [
         ('pending_approval', 'Onay Bekliyor (Para Havuzda)'),
         ('approved', 'Onaylandı (Bekleniyor)'),
-        # 🎯 YENİ: Teslimat sürecindeki ara durumlar
-        ('handover_pending', 'Satıcı Teslimat Onayı Bekliyor'), # Kiracı teslim alıp fotoğraf yüklediğinde
+        ('handover_pending', 'Satıcı Teslimat Onayı Bekliyor'), 
         ('active', 'Kirada (Teslim Edildi)'),
-        ('return_pending', 'Kiracı İade Onayı Bekliyor'), # Satıcı iade alıp fotoğraf yüklediğinde
+        ('return_pending', 'Kiracı İade Onayı Bekliyor'), 
         ('completed', 'Tamamlandı (İade Edildi)'),
         ('rejected', 'Reddedildi / İptal'),
         ('disputed', 'Uyuşmazlık (Sorun Var)'),
@@ -83,11 +127,9 @@ class Booking(models.Model):
     
     cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='cancelled_bookings')
     
-    # 🎯 YENİ: Tarafların Teslimat/İade Esnasında Bıraktıkları Yorumlar
     handover_notes = models.TextField(blank=True, null=True, help_text="Kiracının ürünü alırken bıraktığı not")
     return_notes = models.TextField(blank=True, null=True, help_text="Satıcının ürünü iade alırken bıraktığı not")
 
-    # 🎯 YENİ: Uyuşmazlık Çözümü İçin Gerekli Alanlar
     dispute_reason = models.TextField(blank=True, null=True, help_text="İtiraz edilirse sebebi")
     
     DISPUTE_WINNER_CHOICES = (
@@ -126,14 +168,16 @@ class Booking(models.Model):
 
 
 class BookingImage(models.Model):
-    # 🎯 DÜZELTİLDİ: Sadece image_type değil, stage (aşama) olarak netleştirildi.
     IMAGE_TYPE_CHOICES = [
         ('handover', 'Teslim Alırken (Kiracı Yükledi)'),
         ('return', 'İade Ederken (Satıcı Yükledi)'),
     ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='booking_evidence/')
+    
+    # 🛡️ ZIRHLANDI: Sadece saf görseller kabul edilir
+    image = models.ImageField(upload_to='booking_evidence/', validators=[validate_image_security])
+    
     image_type = models.CharField(max_length=10, choices=IMAGE_TYPE_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -144,7 +188,10 @@ class BookingImage(models.Model):
 class ItemImage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='item_images/') 
+    
+    # 🛡️ ZIRHLANDI: Sadece saf görseller kabul edilir
+    image = models.ImageField(upload_to='item_images/', validators=[validate_image_security]) 
+    
     is_main = models.BooleanField(default=False) 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -205,11 +252,9 @@ class Message(models.Model):
     
 class Review(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    # 🎯 1. DEĞİŞİKLİK: OneToOne yerine ForeignKey yaptık. Artık hem kiracı hem satıcı yorum atabilir.
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='reviews')
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name='reviews')
     reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews_given')
-    # 🎯 2. DEĞİŞİKLİK: "owner" kelimesini "target_user" yaptık ki satıcı da kiracıyı puanlayabilsin.
     target_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reviews_received')
     
     rating = models.IntegerField(choices=[(i, i) for i in range(1, 6)]) 
@@ -230,7 +275,7 @@ class Notification(models.Model):
         ('booking', 'Kiralama Talebi'),
         ('wallet', 'Cüzdan ve Finans'),
         ('system', 'İptal ve Sistem'),
-        ('review', 'Değerlendirme'), # 🎯 YENİ: Yorum bildirimleri için
+        ('review', 'Değerlendirme'), 
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     sender = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True) 
@@ -280,9 +325,6 @@ def create_booking_notification(sender, instance, created, **kwargs):
             }
         )
 
-# -----------------------------------------------------------
-# 🛡️ SİSTEM AKTİVİTE LOGLARI (GOD MODE İZLEME)
-# -----------------------------------------------------------
 class ActivityLog(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='activity_logs')
     action_type = models.CharField(max_length=50) 
@@ -297,7 +339,6 @@ class ActivityLog(models.Model):
     def __str__(self):
         return f"{self.user.email} - {self.action_type} - {self.created_at}"
 
-# --- OTOMATİK LOG YAKALAYICI SİNYALLER (SIGNALS) ---
 
 @receiver(post_save, sender=Item)
 def log_item_creation(sender, instance, created, **kwargs):
@@ -326,11 +367,9 @@ def log_booking_creation(sender, instance, created, **kwargs):
             description=f"'{instance.item.title}' ürününü kiralamak için işlem başlattı. (Tutar: ₺{instance.total_price})"
         )
 
-# 🎯 SENİN MODELİNE ÖZEL: WalletTransaction tiplerini ayırıyoruz
 @receiver(post_save, sender=WalletTransaction) 
 def log_wallet_transaction(sender, instance, created, **kwargs):
     if created:
-        # DEPOSIT, INCOME ve REFUND para girişidir. Diğerleri çıkış.
         if instance.transaction_type in ['DEPOSIT', 'INCOME', 'REFUND']:
             action = "PARA GİRİŞİ"
         else:
@@ -360,10 +399,11 @@ class Report(models.Model):
     reported_item = models.ForeignKey(Item, on_delete=models.CASCADE, null=True, blank=True, related_name='reports')
     reported_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='reports_received')
     
-    reason = models.CharField(max_length=255) # Örn: Sahte ürün, Hakaret, Yanıltıcı Görsel
+    reason = models.CharField(max_length=255) 
     description = models.TextField(blank=True, null=True)
     
-    proof_image = models.ImageField(upload_to='reports/proofs/', null=True, blank=True, help_text="Kullanıcının şikayetine eklediği kanıt görseli.")
+    # 🛡️ ZIRHLANDI: Sadece saf görseller kabul edilir
+    proof_image = models.ImageField(upload_to='reports/proofs/', null=True, blank=True, validators=[validate_image_security], help_text="Kullanıcının şikayetine eklediği kanıt görseli.")
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -397,8 +437,8 @@ class Ticket(models.Model):
     subject = models.CharField(max_length=255, help_text="Kullanıcının yazdığı kısa konu başlığı")
     description = models.TextField(help_text="Sorunun detaylı açıklaması")
     
-    # Maksimum 1 görsel eklenebilecek alan
-    attachment = models.ImageField(upload_to='tickets/attachments/', null=True, blank=True, help_text="Kullanıcının sorunuyla ilgili eklediği görsel.")
+    # 🛡️ ZIRHLANDI: Destek talebi için resim veya PDF dosyası yüklenebilir
+    attachment = models.ImageField(upload_to='tickets/attachments/', null=True, blank=True, validators=[validate_document_security], help_text="Kullanıcının sorunuyla ilgili eklediği görsel.")
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     
@@ -412,18 +452,13 @@ class Ticket(models.Model):
         return f"Ticket #{str(self.id)[:8]} - {self.user.username} ({self.get_topic_display()})"
 
 
-# -----------------------------------------------------------
-# 🚀 GLOBAL WEBSOCKET BİLDİRİM DAĞITICI (BROADCASTER)
-# -----------------------------------------------------------
 @receiver(post_save, sender=Notification)
 def broadcast_realtime_notification(sender, instance, created, **kwargs):
-
     if created or not instance.is_read:
         try:
             channel_layer = get_channel_layer()
             group_name = f"user_notifications_{instance.user.id}"
             
-            # Print atarak terminalde sorunu yakalayacağız
             print(f"🚀 [WS-SİNYAL] {group_name} grubuna bildirim gönderilmeye çalışılıyor... (Yeni/Güncelleme)")
             
             async_to_sync(channel_layer.group_send)(
@@ -446,7 +481,6 @@ def broadcast_realtime_notification(sender, instance, created, **kwargs):
             print(f"❌ [WS-SİNYAL HATASI] Bildirim gönderilirken hata oluştu: {e}")
 
 
-
 @receiver(post_save, sender=ActivityLog)
 def broadcast_admin_live_feed(sender, instance, created, **kwargs):
     if created:
@@ -454,7 +488,6 @@ def broadcast_admin_live_feed(sender, instance, created, **kwargs):
             channel_layer = get_channel_layer()
             group_name = "admin_live_feed"
             
-            # Asenkron olarak admin tüneline fırlat
             async_to_sync(channel_layer.group_send)(
                 group_name,
                 {

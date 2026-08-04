@@ -9,10 +9,6 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
-
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-3aoqpp_53bwr6h)!^ivl7(^mzn-544672zbk+9$@e6)*r2yl)='
 
@@ -21,16 +17,14 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
-
 # Application definition
-
 INSTALLED_APPS = [
     "daphne",
     "channels",
     "unfold",
     'rest_framework',
     'corsheaders',
-    'rest_framework_simplejwt.token_blacklist',
+    'rest_framework_simplejwt.token_blacklist', # Kara Liste uygulaması aktif!
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -72,10 +66,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'core.wsgi.application'
 ASGI_APPLICATION = "core.asgi.application"
 
-
 # Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -83,10 +74,7 @@ DATABASES = {
     }
 }
 
-
 # Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
-
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -102,24 +90,14 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
-# https://docs.djangoproject.com/en/6.0/topics/i18n/
-
 LANGUAGE_CODE = 'tr'
-
 TIME_ZONE = 'Europe/Istanbul'
-
 USE_I18N = True
-
 USE_TZ = True
 
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/6.0/howto/static-files/
-
+# Static files
 STATIC_URL = 'static/'
-
 
 # CORS Ayarları
 CORS_ALLOWED_ORIGINS = [
@@ -132,43 +110,48 @@ AUTH_USER_MODEL = 'users.CustomUser'
 
 # Endüstri Standardı Çift Giriş Destekleyen Kimlik Doğrulama Katmanı
 AUTHENTICATION_BACKENDS = [
-    'users.backends.EmailOrUsernameModelBackend',  # Özel yazdığımız akıllı sınıf
-    'django.contrib.auth.backends.ModelBackend',   # Django'nun varsayılan doğrulaması
+    'users.backends.EmailOrUsernameModelBackend', 
+    'django.contrib.auth.backends.ModelBackend',
 ]
 
-# Django REST Framework & JWT Ayarları
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: DRF VE RATE LIMITING (HIZ SINIRLARI)
+# ==========================================
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    )
+    ),
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle'
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/day',      # Kayıtsız ziyaretçi günde en fazla 100 API isteği atabilir
+        'user': '1000/day',     # Giriş yapmış kullanıcı günde en fazla 1000 API isteği atabilir
+        'login_attempts': '5/min', # Brute-force Koruması: Saniyede 1 şifre deneyen botu kilitler (5 deneme/dakika)
+        'register_attempts': '3/hour', # Bot hesap oluşturma (Spam) Koruması
+        'password_reset': '3/hour',    # Şifre Sıfırlama Spam Koruması
+    },
+    'EXCEPTION_HANDLER': 'core.exceptions.custom_exception_handler',
 }
 
-
-# E-Posta Gönderim Ayarları (Geliştirme Aşaması)
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-
-# Canlıda gerçek mail göndermek istediğinde burayı açacaksın:
-# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-# EMAIL_HOST = 'smtp.gmail.com'
-# EMAIL_PORT = 587
-# EMAIL_USE_TLS = True
-# EMAIL_HOST_USER = 'your-email@gmail.com'
-# EMAIL_HOST_PASSWORD = 'your-app-password'
 
 import os
 
-# Medya dosyalarının (yüklenen fotoğrafların) tutulacağı klasör ayarları
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 from datetime import timedelta
 
-# Django REST Framework & JWT Süre Uzatma Ayarları
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: JWT TOKEN AYARLARI
+# ==========================================
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),      # Access token artık 24 saat geçerli
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),    # Refresh token 30 gün geçerli
-    'ROTATE_REFRESH_TOKENS': False,
-    'BLACKLIST_AFTER_ROTATION': False,
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
+    'ROTATE_REFRESH_TOKENS': True,          # 🎯 YENİ: Her token yenilendiğinde eskisini çöpe at (Rotasyon)
+    'BLACKLIST_AFTER_ROTATION': True,       # 🎯 YENİ: Eski ve çalınan tokenları Kara Listeye al
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'USER_ID_FIELD': 'id',
@@ -180,25 +163,15 @@ SIMPLE_JWT = {
 UNFOLD = {
     "SITE_TITLE": "RentCircle",
     "SITE_HEADER": "RentCircle Yönetim Paneli",
-    # Mavi tonlarında modern bir ana renk tanımlaması
     "COLORS": {
         "primary": {
-            "50": "#eff6ff",
-            "100": "#dbeafe",
-            "200": "#bfdbfe",
-            "300": "#93c5fd",
-            "400": "#60a5fa",
-            "500": "#3b82f6", 
-            "600": "#2563eb",
-            "700": "#1d4ed8",
-            "800": "#1e40af",
-            "900": "#1e3a8a",
-            "950": "#172554",
+            "50": "#eff6ff", "100": "#dbeafe", "200": "#bfdbfe", "300": "#93c5fd",
+            "400": "#60a5fa", "500": "#3b82f6", "600": "#2563eb", "700": "#1d4ed8",
+            "800": "#1e40af", "900": "#1e3a8a", "950": "#172554",
         },
     },
-    # Özel Sol Menü (Sidebar) Yapılandırması
     "SIDEBAR": {
-        "show_search": True, # Sol üste arama çubuğu ekler
+        "show_search": True,
         "show_all_applications": True,
         "navigation": [
             {
@@ -234,22 +207,13 @@ EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
-# Kendi bilgilerini buraya gir
-EMAIL_HOST_USER = 'ibrahimbbcn1907@gmail.com' # Şifresini aldığın Gmail adresin
-EMAIL_HOST_PASSWORD = 'tasm xbax hhfg xsca' # Örn: 'abcd efgh ijkl mnop' boşluklu veya boşluksuz olabilir
+EMAIL_HOST_USER = 'ibrahimbbcn1907@gmail.com' 
+EMAIL_HOST_PASSWORD = 'tasm xbax hhfg xsca' 
+DEFAULT_FROM_EMAIL = 'RentCircle '
 
-# Default gönderici ismi (Opsiyonel ama maillerin spama düşmesini azaltır)
-DEFAULT_FROM_EMAIL = 'RentCircle <ibrahimbbcn1907@gmail.com>'
-
-
-# IYZICO AYARLARI
 IYZICO_API_KEY = 'sandbox-Ft87nBAz0FttTk27CVQAkPl8kLYv1Mok'
 IYZICO_SECRET_KEY = 'sandbox-vq6GaNaMITifE38xOInobhdK25VB4MnI'
 IYZICO_BASE_URL = 'sandbox-api.iyzipay.com'
-
-# ==========================================
-# WEBSOCKET / CHANNELS / UPSTASH REDIS
-# ==========================================
 
 CHANNEL_LAYERS = {
     "default": {

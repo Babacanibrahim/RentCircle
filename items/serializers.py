@@ -1,3 +1,4 @@
+import magic # 🛡️ YENİ: Dosya DNA'sını (MIME-Type) analiz edecek kütüphane
 from rest_framework import serializers
 from .models import Category, Item, Booking, ItemImage, Conversation, Message, BookingImage, Review, Notification, ActivityLog, Report, Ticket
 from users.models import WithdrawalRequest
@@ -6,6 +7,41 @@ from django.db.models import Max, Avg
 from django.utils import timezone
 
 User = get_user_model()
+
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: ZARARLI DOSYA TARAYICISI (X-RAY)
+# ==========================================
+def validate_file_security(file_obj, is_document=False):
+    """
+    Sisteme yüklenen dosyaların uzantılarına kanmayıp, Magic Bytes (DNA) 
+    analizi yaparak zararlı yazılımların (Malware) sunucuya sızmasını engeller.
+    """
+    if not file_obj:
+        return file_obj
+
+    try:
+        # Dosyanın ilk 2048 baytını belleğe alıp okuyoruz
+        file_obj.seek(0)
+        file_data = file_obj.read(2048)
+        file_obj.seek(0) # Dosya imlecini başa sarıyoruz ki Django kaydederken bozulmasın
+        
+        # İçeriğin GERÇEK formatını analiz ediyoruz
+        mime_type = magic.from_buffer(file_data, mime=True)
+        
+        allowed_mimes = ['image/jpeg', 'image/png', 'image/webp']
+        if is_document:
+            allowed_mimes.extend(['application/pdf']) # Destek (Ticket) sistemi için PDF'e izin ver
+            
+        if mime_type not in allowed_mimes:
+            raise serializers.ValidationError(
+                f"🚨 Güvenlik İhlali: Dosyanın uzantısı değiştirilmiş veya içerik zararlı! (Tespit edilen: {mime_type})"
+            )
+    except serializers.ValidationError:
+        raise
+    except Exception:
+        raise serializers.ValidationError("Dosya güvenlik taramasından geçirilemedi. Lütfen geçerli bir dosya yükleyin.")
+        
+    return file_obj
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -26,11 +62,14 @@ class ReportSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Report
-        # YENİ: 'proof_image' eklendi
         fields = ['id', 'reporter_name', 'reporter_username', 'target_type', 'reported_user', 'reported_username', 'reported_item', 'reported_item_title', 'reason', 'description', 'proof_image', 'status', 'created_at_formatted']
 
     def get_created_at_formatted(self, obj):
         return obj.created_at.strftime("%d.%m.%Y %H:%M")
+    
+    # 🛡️ ZIRHLI: Şikayet Kanıt Dosyası Kontrolü
+    def validate_proof_image(self, value):
+        return validate_file_security(value)
 
 
 class TicketSerializer(serializers.ModelSerializer):
@@ -46,6 +85,10 @@ class TicketSerializer(serializers.ModelSerializer):
     def get_created_at_formatted(self, obj):
         return obj.created_at.strftime("%d.%m.%Y %H:%M")
 
+    # 🛡️ ZIRHLI: Destek Talebi Dosyası Kontrolü (PDF ve Resim serbest)
+    def validate_attachment(self, value):
+        return validate_file_security(value, is_document=True)
+
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -58,6 +101,10 @@ class ItemImageSerializer(serializers.ModelSerializer):
         model = ItemImage
         fields = ['id', 'image', 'is_main']
 
+    # 🛡️ ZIRHLI: İlan Fotoğrafı Kontrolü
+    def validate_image(self, value):
+        return validate_file_security(value)
+
 
 class ReviewSerializer(serializers.ModelSerializer):
     reviewer_username = serializers.CharField(source='reviewer.username', read_only=True)
@@ -67,7 +114,7 @@ class ReviewSerializer(serializers.ModelSerializer):
     
     item_title = serializers.CharField(source='item.title', read_only=True)
     item_image = serializers.SerializerMethodField()
-    target_username = serializers.CharField(source='target_user.username', read_only=True) # YENİ
+    target_username = serializers.CharField(source='target_user.username', read_only=True)
     
     class Meta:
         model = Review
@@ -75,7 +122,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             'id', 'booking', 'item', 'item_title', 'item_image', 
             'reviewer', 'reviewer_username', 'reviewer_show_name', 
             'reviewer_first_name', 'reviewer_last_name', 
-            'target_user', 'target_username', # YENİ
+            'target_user', 'target_username',
             'rating', 'comment', 'created_at'
         ]
         read_only_fields = ['reviewer', 'target_user', 'item']
@@ -95,6 +142,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Sadece tamamlanmış kiralamalar için değerlendirme yapabilirsiniz.")
         return data
 
+
 class ActivityLogSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     created_at_formatted = serializers.SerializerMethodField()
@@ -104,7 +152,6 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'action_type', 'description', 'created_at', 'created_at_formatted']
 
     def get_created_at_formatted(self, obj):
-        # Saat dilimini düzgün göstermek için formatlama
         return obj.created_at.strftime("%d.%m.%Y %H:%M:%S")
 
 
@@ -189,7 +236,6 @@ class ItemSerializer(serializers.ModelSerializer):
         ]
 
     def get_reviews(self, obj):
-        # İlan detay sayfasında sadece "Satıcıya" yapılan yorumlar görünsün (Satıcının kiracıya yaptığı yorum o ilanda görünmesin)
         request = self.context.get('request')
         reviews = obj.reviews.filter(target_user=obj.owner)
         return ReviewSerializer(reviews, many=True, context={'request': request}).data
@@ -230,6 +276,10 @@ class BookingImageSerializer(serializers.ModelSerializer):
         model = BookingImage
         fields = ['id', 'image', 'image_type']
 
+    # 🛡️ ZIRHLI: Teslimat/İade Kanıt Fotoğrafı Kontrolü
+    def validate_image(self, value):
+        return validate_file_security(value)
+
 
 class BookingSerializer(serializers.ModelSerializer):
     item_detail = ItemSerializer(source='item', read_only=True)
@@ -241,7 +291,6 @@ class BookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Booking
-        # 🎯 YENİ EKLENENLER: handover_notes, return_notes, dispute_winner
         fields = [
             'id', 'item', 'item_detail', 'renter', 'renter_name', 
             'start_date', 'end_date', 'status', 'total_price', 'deposit_price', 
@@ -249,7 +298,6 @@ class BookingSerializer(serializers.ModelSerializer):
             'handover_notes', 'return_notes', 'dispute_reason', 'dispute_winner', 
             'has_review', 'cancelled_by_name', 'created_at' 
         ]
-        # Güvenlik için notları ve kararları read-only yapıyoruz (sadece özel API'lerden güncellenmeli)
         read_only_fields = [
             'renter', 'total_price', 'deposit_price', 'status', 'handover_pin', 
             'return_pin', 'handover_images', 'return_images',
@@ -259,7 +307,6 @@ class BookingSerializer(serializers.ModelSerializer):
     def get_has_review(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
-            # 🎯 DEĞİŞİKLİK: hasattr yerine artık filter ile bakıyoruz çünkü ForeignKey oldu
             return obj.reviews.filter(reviewer=request.user).exists()
         return False
 

@@ -1,8 +1,15 @@
 from django.urls import path
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework.throttling import ScopedRateThrottle
+
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: Brute-Force (Siber Saldırı) Korumalı Login Sınıfı
+# ==========================================
+class CustomTokenObtainPairView(TokenObtainPairView):
+    throttle_classes = [ScopedRateThrottle]
+    # settings.py'de tanımladığımız '5/min' (Dakikada max 5 deneme) kuralını buraya bağlıyoruz
+    throttle_scope = 'login_attempts' 
+
 from .views import (RegisterView, ActivateAccountView, UserProfileView, LogoutViewSet, 
                     ChangePasswordView, ForgotPasswordRequestView, VerifyOTPView, ResetPasswordConfirmView,
                     WalletDetailView, RequestWithdrawalView, InitiateDepositView, deposit_callback)
@@ -10,7 +17,10 @@ from .views import (RegisterView, ActivateAccountView, UserProfileView, LogoutVi
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='auth_register'),
     path('activate/<str:uidb64>/<str:token>/', ActivateAccountView.as_view(), name='activate_account'),
-    path('login/', TokenObtainPairView.as_view(), name='auth_login'),
+    
+    # 🎯 GÜNCELLENDİ: Standart login yerine artık bizim kalkanlı logini kullanıyoruz
+    path('login/', CustomTokenObtainPairView.as_view(), name='auth_login'),
+    
     path('refresh/', TokenRefreshView.as_view(), name='auth_refresh'),
     path('logout/', LogoutViewSet.as_view(), name='auth_logout'),
     
@@ -26,5 +36,4 @@ urlpatterns = [
     path('wallet/withdraw/', RequestWithdrawalView.as_view(), name='wallet_withdraw'),
     path('wallet/deposit/initiate/', InitiateDepositView.as_view(), name='wallet_deposit_initiate'),
     path('wallet/deposit/callback/', deposit_callback, name='wallet_deposit_callback'),
-
 ]
