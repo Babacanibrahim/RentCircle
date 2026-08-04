@@ -1,11 +1,11 @@
 import React, { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Link } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { authApi } from "../services/authApi";
 import { occupationsList } from "../data/mockData";
 import formattedTurkeyData from "../data/parseData";
 import countriesJson from "../data/phoneCodes";
-import { toast } from "../../../utils/alerts"; // 🎯 YENİ
+import { toast } from "../../../utils/alerts";
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -90,7 +90,6 @@ const Register = () => {
       const data = await authApi.register(finalData);
       toast.fire({ icon: "success", title: data.message || "Kayıt başarılı! Lütfen e-postanızı onaylayın." });
 
-      // Kayıt başarılı olunca formu sıfırlayalım ki tekrar basmasın
       setFormData({
         username: "",
         email: "",
@@ -106,7 +105,14 @@ const Register = () => {
         occupation: "",
       });
     } catch (err) {
-      // 🎯 UX DOSTU HATA YÖNETİMİ
+      // 🛡️ YENİ: Bot Spam Koruması (Rate Limiting 429 Yakalama)
+      if (err.response && err.response.status === 429) {
+        return toast.fire({
+          icon: "warning",
+          title: err.response.data.error || "Kısa sürede çok fazla kayıt denemesi yaptınız. Lütfen biraz bekleyin.",
+        });
+      }
+
       const errData = err.response?.data;
       let errMsg = "Kayıt olurken beklenmeyen bir hata oluştu.";
 
@@ -278,6 +284,15 @@ const Register = () => {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="flex items-center justify-end text-xs text-[#cbd5e1] pt-1">
+          <span className="cursor-default">
+            Zaten hesabın var mı?{" "}
+            <Link to="/login" className="text-blue-400 font-semibold hover:underline cursor-pointer transition-colors">
+              Giriş Yap
+            </Link>
+          </span>
         </div>
 
         <button

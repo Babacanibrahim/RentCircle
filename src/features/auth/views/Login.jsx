@@ -54,7 +54,6 @@ const Login = () => {
 
       toast.fire({ icon: "success", title: "Giriş başarılı! Yönlendiriliyorsunuz..." });
 
-      // 🎯 ÇÖZÜM: Geldiği yeri hatırla ve oraya fırlat!
       setTimeout(() => {
         let nextUrl = searchParams.get("next") || location.state?.from?.pathname || location.state?.from;
         if (!nextUrl) {
@@ -63,6 +62,14 @@ const Login = () => {
         window.location.href = nextUrl;
       }, 500);
     } catch (err) {
+      // 🛡️ YENİ: Brute-Force Koruması (Rate Limiting 429 Yakalama)
+      if (err.response && err.response.status === 429) {
+        return toast.fire({
+          icon: "warning",
+          title: err.response.data.error || "Çok fazla deneme yaptınız. Lütfen biraz bekleyip tekrar deneyin.",
+        });
+      }
+
       let errMsg = "Giriş yapılamadı. Lütfen bilgilerinizi kontrol edin.";
       if (err.response?.data) {
         if (err.response.data.detail === "No active account found with the given credentials") {

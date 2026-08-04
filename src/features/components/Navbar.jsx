@@ -5,6 +5,8 @@ import axios from "axios";
 import formattedTurkeyData from "../auth/data/parseData";
 import { itemApi } from "../items/services/itemApi";
 import { toast, cyberConfirm } from "../../utils/alerts";
+// 🛡️ DÜZELTME: Backend'e haber vermek için authApi'yi içeri aktardık
+import { authApi } from "../auth/services/authApi";
 
 const Navbar = ({ onLocationFilter }) => {
   const navigate = useNavigate();
@@ -146,7 +148,7 @@ const Navbar = ({ onLocationFilter }) => {
             // Gelen cevap sadece Pong ise ekrana basmadan işlemi sonlandır
             if (incomingNotif.type === "pong") return;
 
-            // Ekrana havalı bir Toast düşür (Ahmet 10 defa mesaj atsa da ekranda 10 defa Toast çıkar, bu normal ve istenen durumdur)
+            // Ekrana havalı bir Toast düşür
             toast.fire({
               icon: incomingNotif.notification_type === "system" ? "warning" : "info",
               title: incomingNotif.sender_name !== "Sistem" ? incomingNotif.sender_name : "RentCircle",
@@ -163,7 +165,7 @@ const Navbar = ({ onLocationFilter }) => {
               const existingIndex = prev.findIndex((n) => String(n.id) === String(incomingNotif.id));
 
               if (existingIndex !== -1) {
-                // Eğer bu ID'li bildirim zaten varsa (örneğin aynı sohbet odasının bildirimi güncellendiyse), eskisini silip en üste yenisini koy
+                // Eğer bu ID'li bildirim zaten varsa eskisini silip en üste yenisini koy
                 const newList = [...prev];
                 newList.splice(existingIndex, 1);
                 return [incomingNotif, ...newList];
@@ -274,15 +276,22 @@ const Navbar = ({ onLocationFilter }) => {
 
     if (result.isConfirmed) {
       try {
+        const refreshToken = localStorage.getItem("refresh_token") || sessionStorage.getItem("refresh_token");
+        console.log("🔍 [FRONTEND TEST] Backend'e gönderilen Token:", refreshToken);
+
+        if (refreshToken) {
+          const response = await authApi.logout(refreshToken);
+          console.log("✅ [FRONTEND TEST] Backend Cevabı:", response);
+        }
       } catch (error) {
-        console.error("Çıkış işlemi sırasında hata oluştu:", error);
+        console.error("❌ [FRONTEND TEST HATASI] Backend'e ulaşılamadı:", error);
       } finally {
         localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
-        sessionStorage.removeItem("access_token");
-        sessionStorage.removeItem("refresh_token");
+        sessionStorage.clear();
+
+        // 🎯 DÜZELTME: Sayfayı yenilemek (console'u silmek) yerine React Router ile yönlendir.
         navigate("/login");
-        setIsProfileMenuOpen(false);
       }
     }
   };
