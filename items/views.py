@@ -7,14 +7,14 @@ from django.db.models import Q, Sum
 from django.core.cache import cache
 from datetime import datetime, timedelta
 from django.utils import timezone
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.utils.text import slugify
 from django.db import transaction
 from decimal import Decimal
+import filetype
+import traceback # 🚨 DEBUG İÇİN EKLENDİ
 from django.contrib.auth import get_user_model
 
-# 🛡️ YENİ: Hata yakalama kütüphaneleri
-from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
 from users.models import Wallet, WalletTransaction, WithdrawalRequest
@@ -26,6 +26,53 @@ from .serializers import (CategorySerializer, ItemSerializer, BookingSerializer,
                           WithdrawalRequestSerializer, ReportSerializer, TicketSerializer)
 
 User = get_user_model()
+
+
+# ==========================================
+# 🛡️ SİBER GÜVENLİK KAPISI (TEK ELDEN YÖNETİM)
+# ==========================================
+def validate_file_security(file_obj, is_document=False):
+    """
+    Sisteme yüklenen dosyaların uzantılarına kanmayıp, DNA
+    analizi yaparak zararlı yazılımların (Malware) sunucuya sızmasını engeller.
+    """
+    if not file_obj:
+        return file_obj
+
+    try:
+        # Dosya imlecini başa sar ve ilk 2048 byte'ı oku
+        file_obj.seek(0)
+        file_data = file_obj.read(2048)
+        
+        # 🎯 YENİ SİSTEM: filetype ile dosyanın gerçek türünü bul
+        kind = filetype.guess(file_data)
+        
+        if kind is None:
+            raise DRFValidationError("🚨 Güvenlik İhlali: Dosyanın türü doğrulanamadı. Bu sahte bir dosya olabilir!")
+            
+        mime_type = kind.mime
+        print(f"🔍 [X-RAY] Taranan Dosya Mime Tipi: {mime_type}") # Terminalden görebilmen için
+        
+        allowed_mimes = ['image/jpeg', 'image/png', 'image/webp']
+        if is_document:
+            allowed_mimes.extend(['application/pdf']) 
+            
+        if mime_type not in allowed_mimes:
+            raise DRFValidationError(
+                f"🚨 Güvenlik İhlali: Dosyanın uzantısı sahte veya içerik zararlı! (Tespit edilen DNA: {mime_type})"
+            )
+            
+        # KRİTİK: Tarama bittikten sonra dosya okuma imlecini başa sar
+        file_obj.seek(0)
+        
+    except DRFValidationError:
+        raise
+    except Exception as e:
+        print("🚨 [X-RAY ÇÖKTÜ] Hata Detayı:")
+        traceback.print_exc()
+        raise DRFValidationError(f"Güvenlik taraması sırasında sistem hatası oluştu. (Detay: {str(e)})")
+        
+    return file_obj
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -62,6 +109,11 @@ class TicketViewSet(viewsets.ModelViewSet):
         return Ticket.objects.filter(user=self.request.user).order_by('-created_at')
 
     def perform_create(self, serializer):
+        attachment = self.request.FILES.get('attachment')
+        # 🎯 KAPI KONTROLÜ
+        if attachment:
+            validate_file_security(attachment, is_document=True)
+            
         serializer.save(user=self.request.user)
 
 
@@ -78,6 +130,13 @@ class ReportViewSet(viewsets.ViewSet):
 
         if target_type not in ['item', 'user'] or not reason:
             return Response({"error": "Eksik bilgi gönderildi."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 🎯 KAPI KONTROLÜ
+        if proof_image:
+            try:
+                validate_file_security(proof_image)
+            except DRFValidationError as e:
+                return Response({"error": str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST)
 
         report = Report(
             reporter=request.user,
@@ -99,8 +158,6 @@ class ReportViewSet(viewsets.ViewSet):
                     target_user = User.objects.get(id=user_id)
                     report.reported_user = target_user
             
-            # 🛡️ GÜVENLİK YAMASI: Manuel kayıtta X-Ray taramasını zorla çalıştır
-            report.full_clean()
             report.save()
             return Response({"message": "Şikayetiniz alınmıştır."}, status=status.HTTP_201_CREATED)
             
@@ -108,16 +165,12 @@ class ReportViewSet(viewsets.ViewSet):
             return Response({"error": "Şikayet edilmek istenen ilan bulunamadı."}, status=status.HTTP_404_NOT_FOUND)
         except User.DoesNotExist:
             return Response({"error": "Şikayet edilmek istenen kullanıcı bulunamadı."}, status=status.HTTP_404_NOT_FOUND)
-        except DjangoValidationError as e:
-            # X-Ray'den dönen hatayı Frontend'e yansıt
-            error_msg = e.message_dict.get('proof_image', ["Bilinmeyen bir dosya hatası oluştu."])[0]
-            return Response({"error": error_msg}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": f"Bir hata oluştu: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
-
 class ItemViewSet(viewsets.ModelViewSet):
     serializer_class = ItemSerializer
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
     filter_backends = [filters.SearchFilter]
     search_fields = ['title', 'description', 'category__name']
 
@@ -210,6 +263,10 @@ class ItemViewSet(viewsets.ModelViewSet):
         if not images:
             raise DRFValidationError({"error": "Güvenlik protokolü gereği en az 1 adet ilan fotoğrafı yüklemelisiniz."})
 
+        # 🎯 KAPI KONTROLÜ: İlan resimlerini içeri girmeden tarat
+        for img in images:
+            validate_file_security(img)
+
         try:
             main_index = int(self.request.data.get('main_image_index', 0))
         except ValueError:
@@ -218,22 +275,13 @@ class ItemViewSet(viewsets.ModelViewSet):
         if main_index >= len(images):
             main_index = 0
         
-        # 🛡️ GÜVENLİK YAMASI: İşlemi atomic (ayrılmaz) yapıyoruz. Hata çıkarsa İlan da silinir.
         with transaction.atomic():
             item = serializer.save(owner=self.request.user)
             
             for index, img in enumerate(images):
                 is_main = True if index == main_index else False
-                
-                # Olayın Kalbi: Dosyayı direkt kaydetmek yerine önce objeyi oluştur
                 image_instance = ItemImage(item=item, image=img, is_main=is_main)
-                try:
-                    # Model katmanındaki X-Ray taramasını zorla çalıştır
-                    image_instance.full_clean() 
-                    image_instance.save()
-                except DjangoValidationError as e:
-                    # Eğer virüs bulursa işlemi iptal edip hatayı fırlat
-                    raise DRFValidationError({"error": e.message_dict.get('image', ["Yüklenen dosya zararlı veya geçersiz!"])[0]})
+                image_instance.save()
 
 
 class BookingViewSet(viewsets.ModelViewSet):
@@ -300,15 +348,17 @@ class BookingViewSet(viewsets.ModelViewSet):
         if not images:
             return Response({'error': 'Güvenlik protokolü gereği en az 1 adet durum fotoğrafı yüklemelisiniz.'}, status=status.HTTP_400_BAD_REQUEST)
             
-        # 🛡️ GÜVENLİK YAMASI: Teslimat kanıtları için X-Ray kontrolü
+        # 🎯 KAPI KONTROLÜ: Teslimat kanıtları içeri girmeden tarat
+        try:
+            for img in images:
+                validate_file_security(img)
+        except DRFValidationError as e:
+            return Response({"error": str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST)
+            
         with transaction.atomic():
             for img in images:
                 image_instance = BookingImage(booking=booking, image=img, image_type='handover')
-                try:
-                    image_instance.full_clean()
-                    image_instance.save()
-                except DjangoValidationError as e:
-                    return Response({"error": e.message_dict.get('image', ["Zararlı dosya tespit edildi!"])[0]}, status=status.HTTP_400_BAD_REQUEST)
+                image_instance.save()
                 
             booking.handover_notes = notes
             booking.status = 'handover_pending'
@@ -332,16 +382,24 @@ class BookingViewSet(viewsets.ModelViewSet):
         if booking.status != 'handover_pending':
             return Response({'error': 'Geçersiz işlem.'}, status=status.HTTP_400_BAD_REQUEST)
             
-        booking.status = 'active'
-        booking.save()
-        
-        Notification.objects.create(
-            user=booking.renter,
-            notification_type='booking',
-            reference_id=str(booking.id),
-            message=f"Satıcı teslimatınızı onayladı. Kiralama süreci resmen başladı! İyi kullanımlar."
-        )
-        return Response({'message': 'Teslimat onaylandı, kiralama aktif duruma geçti.'})
+        with transaction.atomic():
+            booking.status = 'active'
+            booking.save()
+            
+            # 🚀 SATICIYA PARA AKTARIMI: Ürün teslim edildiğine göre Kira Gelirini satıcıya aktar!
+            owner_wallet, _ = Wallet.objects.get_or_create(user=booking.item.owner)
+            owner_wallet.balance += Decimal(str(booking.total_price))
+            owner_wallet.save()
+
+            WalletTransaction.objects.create(
+                wallet=owner_wallet,
+                transaction_type='INCOME',
+                amount=booking.total_price,
+                description=f"'{booking.item.title}' kiralaması başladı. Kira geliri hesabınıza eklendi."
+            )
+            
+        Notification.objects.create(user=booking.renter, notification_type='booking', reference_id=str(booking.id), message=f"Satıcı teslimatınızı onayladı. Kiralama süreci resmen başladı! İyi kullanımlar.")
+        return Response({'message': 'Teslimat onaylandı, kira geliri cüzdanınıza aktarıldı ve işlem aktifleşti.'})
 
     @action(detail=True, methods=['post'])
     def complete_booking(self, request, pk=None):
@@ -360,15 +418,17 @@ class BookingViewSet(viewsets.ModelViewSet):
         if not images:
             return Response({'error': 'Güvenlik protokolü gereği en az 1 adet iade durumu fotoğrafı yüklemelisiniz.'}, status=status.HTTP_400_BAD_REQUEST)
             
-        # 🛡️ GÜVENLİK YAMASI: İade kanıtları için X-Ray kontrolü
+        # 🎯 KAPI KONTROLÜ: İade kanıtları içeri girmeden tarat
+        try:
+            for img in images:
+                validate_file_security(img)
+        except DRFValidationError as e:
+            return Response({"error": str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST)
+            
         with transaction.atomic():
             for img in images:
                 image_instance = BookingImage(booking=booking, image=img, image_type='return')
-                try:
-                    image_instance.full_clean()
-                    image_instance.save()
-                except DjangoValidationError as e:
-                    return Response({"error": e.message_dict.get('image', ["Zararlı dosya tespit edildi!"])[0]}, status=status.HTTP_400_BAD_REQUEST)
+                image_instance.save()
                 
             booking.return_notes = notes
             booking.status = 'return_pending'
@@ -729,6 +789,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
             "conversation_id": conversation.id
         }, status=status.HTTP_201_CREATED)
 
+
     @action(detail=False, methods=['post'])
     def respond_offer(self, request):
         message_id = request.data.get('message_id')
@@ -742,12 +803,32 @@ class ConversationViewSet(viewsets.ModelViewSet):
         if message.sender == request.user:
             return Response({"error": "Kendi teklifinize/konumunuza yanıt veremezsiniz."}, status=status.HTTP_400_BAD_REQUEST)
 
-        message.offer_status = 'accepted' if action_type == 'accept' else 'rejected'
-        message.save()
+        with transaction.atomic():
+            message.offer_status = 'accepted' if action_type == 'accept' else 'rejected'
+            message.save()
 
-        conversation = message.conversation
-        conversation.updated_at = message.updated_at if hasattr(message, 'updated_at') else message.created_at
-        conversation.save()
+            conversation = message.conversation
+            conversation.updated_at = timezone.now()
+            conversation.save()
+
+            # 🚀 YENİ: EĞER TEKLİF KABUL EDİLDİYSE, ÇAKIŞAN DİĞER TÜM TEKLİFLERİ OTOMATİK REDDET!
+            if action_type == 'accept' and message.is_offer:
+                overlapping_offers = Message.objects.filter(
+                    conversation__item=conversation.item,
+                    is_offer=True,
+                    offer_status='pending',
+                    offer_start_date__lte=message.offer_end_date,
+                    offer_end_date__gte=message.offer_start_date
+                ).exclude(id=message.id)
+
+                for overlap_msg in overlapping_offers:
+                    overlap_msg.offer_status = 'rejected'
+                    overlap_msg.save()
+                    
+                    # Diğer sohbetin "son güncellenme" tarihini de tetikle ki liste güncellensin
+                    overlap_conv = overlap_msg.conversation
+                    overlap_conv.updated_at = timezone.now()
+                    overlap_conv.save()
 
         return Response({"message": "İşlem başarıyla gerçekleşti.", "offer_status": message.offer_status}, status=status.HTTP_200_OK)
     
@@ -831,12 +912,11 @@ class PayWithWalletView(APIView):
         try:
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
             end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
-            
             base_price = Decimal(str(base_price_raw))
             deposit_price = base_price * Decimal('0.15')
             total_deduction = base_price + deposit_price 
             
-            item = Item.objects.get(id=item_id)
+            item = Item.objects.select_for_update().get(id=item_id) # 🛡️ Race-condition koruması için ilanı kilitliyoruz
         except Item.DoesNotExist:
             return Response({"error": "İlan bulunamadı."}, status=status.HTTP_404_NOT_FOUND)
         except ValueError:
@@ -848,9 +928,23 @@ class PayWithWalletView(APIView):
         renter_wallet, _ = Wallet.objects.get_or_create(user=renter)
         
         if Decimal(str(renter_wallet.balance)) < total_deduction:
-            return Response({"error": f"Cüzdan bakiyeniz yetersiz. Depozito dâhil toplam {total_deduction} ₺ gerekiyor."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": f"Cüzdan bakiyeniz yetersiz. Depozito dâhil toplam ₺{total_deduction} gerekiyor."}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
+            # 🛡️ 1. KRİTİK KONTROL: Ödeme anında tarih çakışması var mı?
+            overlapping_approved = Booking.objects.filter(
+                item=item,
+                status__in=['approved', 'active', 'handover_pending'],
+                start_date__lte=end_date,
+                end_date__gte=start_date
+            )
+            
+            if overlapping_approved.exists():
+                return Response({
+                    "error": "Üzgünüz! Seçtiğiniz tarih aralığı az önce başka bir kullanıcı tarafından kiralandı ve ödemesi tamamlandı."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # 2. Bakiyeyi Düş ve İşlemi Kaydet
             renter_wallet.balance -= total_deduction
             renter_wallet.save()
 
@@ -858,29 +952,71 @@ class PayWithWalletView(APIView):
                 wallet=renter_wallet,
                 transaction_type='PAYMENT',
                 amount=total_deduction,
-                description=f"'{item.title}' kiralama talebi (Onay Bekliyor) - Kira ({base_price} ₺) + %15 Güvence Bedeli."
+                description=f"'{item.title}' kiralaması onaylandı - Kira (₺{base_price}) + %15 Güvence Bedeli."
             )
 
+            # Sipariş doğrudan 'approved' statüsünde başlar (Çift onay ortadan kalktı)
             booking = Booking.objects.create(
                 item=item,
                 renter=renter,
                 start_date=start_date,
                 end_date=end_date,
                 total_price=base_price, 
-                status='pending_approval' 
+                status='approved' 
+            )
+
+            # 🚀 3. OTOMATİK ÇAKIŞMA TEMİZLİĞİ (Çakışan Diğer Talepleri İptal Et ve İade Yap)
+            conflicting_pending_bookings = Booking.objects.filter(
+                item=item,
+                status='pending_approval',
+                start_date__lte=end_date,
+                end_date__gte=start_date
+            ).exclude(id=booking.id)
+
+            for pending_booking in conflicting_pending_bookings:
+                pending_booking.status = 'rejected'
+                pending_booking.save()
+                
+                # Eğer daha önceden parası çekilmiş bir talep varsa iadesini yap
+                p_rent = Decimal(str(pending_booking.total_price))
+                p_deposit = Decimal(str(pending_booking.deposit_price))
+                p_total = p_rent + p_deposit
+                
+                p_wallet, _ = Wallet.objects.get_or_create(user=pending_booking.renter)
+                p_wallet.balance += p_total
+                p_wallet.save()
+
+                WalletTransaction.objects.create(
+                    wallet=p_wallet,
+                    transaction_type='REFUND',
+                    amount=p_total,
+                    description=f"'{item.title}' ilanı başka bir kullanıcı tarafından kiralandığı için talebiniz iptal edildi ve paranız iade edildi."
+                )
+
+                Notification.objects.create(
+                    user=pending_booking.renter,
+                    notification_type='system',
+                    reference_id=str(pending_booking.id),
+                    message=f"Tarih Çakışması: '{item.title}' ilanı seçtiğiniz tarihler için başkası tarafından kiralandığı için talebiniz otomatik iptal edilerek ₺{p_total} cüzdanınıza iade edildi."
+                )
+
+            # Taraflara Başarı Bildirimleri
+            Notification.objects.create(
+                user=renter,
+                notification_type='booking',
+                reference_id=str(booking.id),
+                message=f"Tebrikler! '{item.title}' kiralama işleminiz onaylandı. Kiralama gününüz geldiğinde teslimat PIN kodu ile ürünü alabilirsiniz."
             )
 
             Notification.objects.create(
-                user=renter,
-                sender=None,
-                item=item,
-                notification_type='wallet',
+                user=item.owner,
+                notification_type='booking',
                 reference_id=str(booking.id),
-                message=f"'{item.title}' talebiniz oluşturuldu. Toplam {total_deduction} ₺ cüzdanınızdan çekilerek güvenli sistem havuzuna aktarıldı."
+                message=f"Harika Haber! '{item.title}' ürününüz {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')} tarihleri arasında kiralandı ve ödemesi alındı."
             )
 
         return Response({
-            "message": "Kiralama talebiniz başarıyla oluşturuldu.",
+            "message": "Kiralama ve ödeme işlemi başarıyla tamamlandı.",
             "booking_id": booking.id
         }, status=status.HTTP_201_CREATED)
 
@@ -1154,7 +1290,8 @@ class AdminDashboardViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def reports_list(self, request):
         reports = Report.objects.select_related('reporter', 'reported_user', 'reported_item').all()
-        serializer = ReportSerializer(reports, many=True)
+        # 🎯 ADMIN PANELİ KIRIK RESİM ÇÖZÜMÜ: context EKLENDİ!
+        serializer = ReportSerializer(reports, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])

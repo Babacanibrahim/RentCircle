@@ -14,21 +14,21 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='bookingimage',
             name='image',
-            field=models.ImageField(upload_to='booking_evidence/', validators=[items.models.validate_image_security]),
+            field=models.ImageField(upload_to='booking_evidence/'),
         ),
         migrations.AlterField(
             model_name='itemimage',
             name='image',
-            field=models.ImageField(upload_to='item_images/', validators=[items.models.validate_image_security]),
+            field=models.ImageField(upload_to='item_images/'),
         ),
         migrations.AlterField(
             model_name='report',
             name='proof_image',
-            field=models.ImageField(blank=True, help_text='Kullanıcının şikayetine eklediği kanıt görseli.', null=True, upload_to='reports/proofs/', validators=[items.models.validate_image_security]),
+            field=models.ImageField(blank=True, help_text='Kullanıcının şikayetine eklediği kanıt görseli.', null=True, upload_to='reports/proofs/'),
         ),
         migrations.AlterField(
             model_name='ticket',
             name='attachment',
-            field=models.ImageField(blank=True, help_text='Kullanıcının sorunuyla ilgili eklediği görsel.', null=True, upload_to='tickets/attachments/', validators=[items.models.validate_document_security]),
+            field=models.ImageField(blank=True, help_text='Kullanıcının sorunuyla ilgili eklediği görsel.', null=True, upload_to='tickets/attachments/'),
         ),
     ]

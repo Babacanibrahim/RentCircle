@@ -297,26 +297,32 @@ class RequestWithdrawalView(APIView):
         wallet = request.user.wallet
         amount = request.data.get('amount')
         iban = request.data.get('iban')
-        otp_code = request.data.get('otp_code') # 🎯 YENİ: Frontend'den gelecek olan 6 haneli kod
+        otp_code = request.data.get('otp_code') # Frontend'den gelecek olan 6 haneli kod
 
         if not amount or not iban:
             return Response({"error": "Tutar ve IBAN zorunludur."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 🛡️ YENİ: SIFIR GÜVEN (ZERO-TRUST) 2FA KONTROLÜ
-        if request.user.is_2fa_enabled:
-            # 1. Kullanıcının 2FA'sı açık ama kod göndermemiş
-            if not otp_code:
-                return Response({
-                    "error": "Bu işlem için İki Aşamalı Doğrulama (2FA) kodu gereklidir.", 
-                    "requires_2fa": True # Frontend'in modal açmasını tetikleyecek gizli bayrak
-                }, status=status.HTTP_403_FORBIDDEN)
-            
-            # 2. Kod göndermiş, cihazı bul ve doğrula
-            device = TOTPDevice.objects.filter(user=request.user, name='default').first()
-            if not device or not device.verify_token(otp_code):
-                return Response({"error": "Geçersiz veya süresi dolmuş 2FA kodu! İşlem reddedildi."}, status=status.HTTP_401_UNAUTHORIZED)
+        # 🛡️ 1. GÜVENLİK DUVARI: 2FA KULLANIMI ZORUNLU KILINDI!
+        if not request.user.is_2fa_enabled:
+            return Response({
+                "error": "Finansal güvenliğiniz için para çekme işlemi yapmadan önce profil ayarlarınızdan İki Aşamalı Doğrulama'yı (2FA) aktifleştirmeniz zorunludur."
+            }, status=status.HTTP_403_FORBIDDEN)
 
-        # (Aşağısı eski kodun birebir aynısı, sadece 2FA'yı geçerse çalışacak)
+        # 🛡️ 2. GÜVENLİK DUVARI: SIFIR GÜVEN (ZERO-TRUST) 2FA KOD KONTROLÜ
+        # 1. Kullanıcının 2FA'sı zorunlu olarak açık, ama modal henüz kodu göndermemiş
+        if not otp_code:
+            return Response({
+                "error": "Bu işlem için İki Aşamalı Doğrulama (2FA) kodu gereklidir.", 
+                "requires_2fa": True # Frontend'in modal açmasını tetikleyecek gizli bayrak
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # 2. Kod gönderilmiş, cihazı bul ve doğrula
+        device = TOTPDevice.objects.filter(user=request.user, name='default').first()
+        if not device or not device.verify_token(otp_code):
+            return Response({
+                "error": "Geçersiz veya süresi dolmuş 2FA kodu! İşlem reddedildi."
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
         try:
             amount = Decimal(str(amount))
             if amount <= 0:

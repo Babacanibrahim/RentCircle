@@ -1,7 +1,6 @@
 import uuid
 import string
 import random
-import magic  # 🛡️ YENİ: X-Ray DNA tarayıcısı
 from decimal import Decimal
 from django.db import models
 from django.conf import settings
@@ -9,53 +8,14 @@ from django.contrib.auth import get_user_model
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
-from django.core.exceptions import ValidationError  # 🛡️ YENİ: Model seviyesi hata fırlatıcı
 from users.models import WalletTransaction
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
+# 🎯 DÜZELTME: "magic" kütüphanesi ve validate_file_security fonksiyonları buradan TAMAMEN SİLİNDİ.
+# Artık dosyalar sadece views.py kapısından geçerken taranacak.
 
-# ==========================================
-# 🛡️ GÜVENLİK ZIRHI: MODEL SEVİYESİ X-RAY DOĞRULAYICILARI
-# ==========================================
-def validate_image_security(file_obj):
-    """Sadece Saf Görsellere (JPG, PNG, WEBP) İzin Verir"""
-    if not file_obj:
-        return
-    try:
-        file_obj.seek(0)
-        file_data = file_obj.read(2048)
-        file_obj.seek(0)
-        
-        mime_type = magic.from_buffer(file_data, mime=True)
-        allowed_mimes = ['image/jpeg', 'image/png', 'image/webp']
-        
-        if mime_type not in allowed_mimes:
-            raise ValidationError(f"🚨 Güvenlik İhlali: Dosyanın uzantısı sahte veya içerik zararlı! (Tespit edilen DNA: {mime_type})")
-    except ValidationError:
-        raise
-    except Exception:
-        raise ValidationError("Dosya güvenlik taramasından geçirilemedi. Lütfen geçerli bir dosya yükleyin.")
-
-def validate_document_security(file_obj):
-    """Destek Talepleri İçin Görsel ve PDF'e İzin Verir"""
-    if not file_obj:
-        return
-    try:
-        file_obj.seek(0)
-        file_data = file_obj.read(2048)
-        file_obj.seek(0)
-        
-        mime_type = magic.from_buffer(file_data, mime=True)
-        allowed_mimes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
-        
-        if mime_type not in allowed_mimes:
-            raise ValidationError(f"🚨 Güvenlik İhlali: Yalnızca resim veya PDF yükleyebilirsiniz! (Tespit edilen DNA: {mime_type})")
-    except ValidationError:
-        raise
-    except Exception:
-        raise ValidationError("Dosya güvenlik taramasından geçirilemedi.")
-
+User = get_user_model()
 
 class Category(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -67,8 +27,6 @@ class Category(models.Model):
 
     def __str__(self):
         return self.name
-
-User = get_user_model()
 
 class Item(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -97,7 +55,6 @@ class Item(models.Model):
 
     def __str__(self):
         return self.title
-
 
 class Booking(models.Model):
     STATUS_CHOICES = [
@@ -166,7 +123,6 @@ class Booking(models.Model):
     def __str__(self):
         return f"{self.renter.email} -> {self.item.title} ({self.status})"
 
-
 class BookingImage(models.Model):
     IMAGE_TYPE_CHOICES = [
         ('handover', 'Teslim Alırken (Kiracı Yükledi)'),
@@ -175,8 +131,8 @@ class BookingImage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='images')
     
-    # 🛡️ ZIRHLANDI: Sadece saf görseller kabul edilir
-    image = models.ImageField(upload_to='booking_evidence/', validators=[validate_image_security])
+    # 🎯 DÜZELTME: validators parametresi KESİNLİKLE kaldırıldı!
+    image = models.ImageField(upload_to='booking_evidence/')
     
     image_type = models.CharField(max_length=10, choices=IMAGE_TYPE_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -184,13 +140,12 @@ class BookingImage(models.Model):
     def __str__(self):
         return f"{self.get_image_type_display()} - {self.booking.id}"
 
-
 class ItemImage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name='images')
     
-    # 🛡️ ZIRHLANDI: Sadece saf görseller kabul edilir
-    image = models.ImageField(upload_to='item_images/', validators=[validate_image_security]) 
+    # 🎯 DÜZELTME: validators parametresi KESİNLİKLE kaldırıldı!
+    image = models.ImageField(upload_to='item_images/') 
     
     is_main = models.BooleanField(default=False) 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -202,7 +157,6 @@ class ItemImage(models.Model):
 
     def __str__(self):
         return f"{'Kapak - ' if self.is_main else ''}Image for {self.item.title}"
-
 
 class Conversation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -218,7 +172,6 @@ class Conversation(models.Model):
 
     def __str__(self):
         return f"{self.renter.username} -> {self.owner.username} ({self.item.title})"
-
 
 class Message(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -268,7 +221,6 @@ class Review(models.Model):
     def __str__(self):
         return f"{self.reviewer.first_name} -> {self.target_user.first_name} ({self.rating} Yıldız)"
     
-
 class Notification(models.Model):
     NOTIFICATION_TYPES = (
         ('message', 'Mesaj'),
@@ -290,7 +242,6 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
-
 
 @receiver(post_save, sender=Message)
 def create_message_notification(sender, instance, created, **kwargs):
@@ -338,7 +289,6 @@ class ActivityLog(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.action_type} - {self.created_at}"
-
 
 @receiver(post_save, sender=Item)
 def log_item_creation(sender, instance, created, **kwargs):
@@ -402,8 +352,8 @@ class Report(models.Model):
     reason = models.CharField(max_length=255) 
     description = models.TextField(blank=True, null=True)
     
-    # 🛡️ ZIRHLANDI: Sadece saf görseller kabul edilir
-    proof_image = models.ImageField(upload_to='reports/proofs/', null=True, blank=True, validators=[validate_image_security], help_text="Kullanıcının şikayetine eklediği kanıt görseli.")
+    # 🎯 DÜZELTME: validators parametresi KESİNLİKLE kaldırıldı!
+    proof_image = models.ImageField(upload_to='reports/proofs/', null=True, blank=True, help_text="Kullanıcının şikayetine eklediği kanıt görseli.")
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -413,7 +363,6 @@ class Report(models.Model):
 
     def __str__(self):
         return f"{self.reporter.username} -> {self.target_type} şikayeti"
-
 
 class Ticket(models.Model):
     TICKET_TOPIC_CHOICES = (
@@ -437,8 +386,8 @@ class Ticket(models.Model):
     subject = models.CharField(max_length=255, help_text="Kullanıcının yazdığı kısa konu başlığı")
     description = models.TextField(help_text="Sorunun detaylı açıklaması")
     
-    # 🛡️ ZIRHLANDI: Destek talebi için resim veya PDF dosyası yüklenebilir
-    attachment = models.ImageField(upload_to='tickets/attachments/', null=True, blank=True, validators=[validate_document_security], help_text="Kullanıcının sorunuyla ilgili eklediği görsel.")
+    # 🎯 DÜZELTME: validators parametresi KESİNLİKLE kaldırıldı!
+    attachment = models.ImageField(upload_to='tickets/attachments/', null=True, blank=True, help_text="Kullanıcının sorunuyla ilgili eklediği görsel.")
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     
@@ -450,7 +399,6 @@ class Ticket(models.Model):
 
     def __str__(self):
         return f"Ticket #{str(self.id)[:8]} - {self.user.username} ({self.get_topic_display()})"
-
 
 @receiver(post_save, sender=Notification)
 def broadcast_realtime_notification(sender, instance, created, **kwargs):
@@ -479,7 +427,6 @@ def broadcast_realtime_notification(sender, instance, created, **kwargs):
             print("✅ [WS-SİNYAL] Bildirim kanala başarıyla fırlatıldı!")
         except Exception as e:
             print(f"❌ [WS-SİNYAL HATASI] Bildirim gönderilirken hata oluştu: {e}")
-
 
 @receiver(post_save, sender=ActivityLog)
 def broadcast_admin_live_feed(sender, instance, created, **kwargs):

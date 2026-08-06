@@ -1,4 +1,3 @@
-import magic # 🛡️ YENİ: Dosya DNA'sını (MIME-Type) analiz edecek kütüphane
 from rest_framework import serializers
 from .models import Category, Item, Booking, ItemImage, Conversation, Message, BookingImage, Review, Notification, ActivityLog, Report, Ticket
 from users.models import WithdrawalRequest
@@ -8,42 +7,6 @@ from django.utils import timezone
 
 User = get_user_model()
 
-# ==========================================
-# 🛡️ GÜVENLİK ZIRHI: ZARARLI DOSYA TARAYICISI (X-RAY)
-# ==========================================
-def validate_file_security(file_obj, is_document=False):
-    """
-    Sisteme yüklenen dosyaların uzantılarına kanmayıp, Magic Bytes (DNA) 
-    analizi yaparak zararlı yazılımların (Malware) sunucuya sızmasını engeller.
-    """
-    if not file_obj:
-        return file_obj
-
-    try:
-        # Dosyanın ilk 2048 baytını belleğe alıp okuyoruz
-        file_obj.seek(0)
-        file_data = file_obj.read(2048)
-        file_obj.seek(0) # Dosya imlecini başa sarıyoruz ki Django kaydederken bozulmasın
-        
-        # İçeriğin GERÇEK formatını analiz ediyoruz
-        mime_type = magic.from_buffer(file_data, mime=True)
-        
-        allowed_mimes = ['image/jpeg', 'image/png', 'image/webp']
-        if is_document:
-            allowed_mimes.extend(['application/pdf']) # Destek (Ticket) sistemi için PDF'e izin ver
-            
-        if mime_type not in allowed_mimes:
-            raise serializers.ValidationError(
-                f"🚨 Güvenlik İhlali: Dosyanın uzantısı değiştirilmiş veya içerik zararlı! (Tespit edilen: {mime_type})"
-            )
-    except serializers.ValidationError:
-        raise
-    except Exception:
-        raise serializers.ValidationError("Dosya güvenlik taramasından geçirilemedi. Lütfen geçerli bir dosya yükleyin.")
-        
-    return file_obj
-
-
 class NotificationSerializer(serializers.ModelSerializer):
     sender_name = serializers.CharField(source='sender.first_name', read_only=True)
     sender_avatar = serializers.CharField(source='sender.username', read_only=True) 
@@ -51,7 +14,6 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = '__all__'
-
 
 class ReportSerializer(serializers.ModelSerializer):
     reporter_name = serializers.CharField(source='reporter.first_name', read_only=True)
@@ -66,10 +28,6 @@ class ReportSerializer(serializers.ModelSerializer):
 
     def get_created_at_formatted(self, obj):
         return obj.created_at.strftime("%d.%m.%Y %H:%M")
-    
-    # 🛡️ ZIRHLI: Şikayet Kanıt Dosyası Kontrolü
-    def validate_proof_image(self, value):
-        return validate_file_security(value)
 
 
 class TicketSerializer(serializers.ModelSerializer):
@@ -85,10 +43,6 @@ class TicketSerializer(serializers.ModelSerializer):
     def get_created_at_formatted(self, obj):
         return obj.created_at.strftime("%d.%m.%Y %H:%M")
 
-    # 🛡️ ZIRHLI: Destek Talebi Dosyası Kontrolü (PDF ve Resim serbest)
-    def validate_attachment(self, value):
-        return validate_file_security(value, is_document=True)
-
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -100,10 +54,6 @@ class ItemImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemImage
         fields = ['id', 'image', 'is_main']
-
-    # 🛡️ ZIRHLI: İlan Fotoğrafı Kontrolü
-    def validate_image(self, value):
-        return validate_file_security(value)
 
 
 class ReviewSerializer(serializers.ModelSerializer):
@@ -275,10 +225,6 @@ class BookingImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = BookingImage
         fields = ['id', 'image', 'image_type']
-
-    # 🛡️ ZIRHLI: Teslimat/İade Kanıt Fotoğrafı Kontrolü
-    def validate_image(self, value):
-        return validate_file_security(value)
 
 
 class BookingSerializer(serializers.ModelSerializer):
