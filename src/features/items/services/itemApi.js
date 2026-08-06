@@ -80,7 +80,20 @@ export const itemApi = {
   adminDeleteItem: async (id) => (await axiosInstance.delete(`items/admin-dashboard/delete_item/?item_id=${id}`, getAuthHeader())).data,
   getSystemLogs: async () => (await axiosInstance.get(`items/admin-dashboard/system_logs/`, getAuthHeader())).data,
   getAdminUserLogs: async (id) => (await axiosInstance.get(`items/admin-dashboard/user_logs/?user_id=${id}`, getAuthHeader())).data,
-  requestWithdrawal: async (data) => (await axiosInstance.post('items/wallet/request_withdrawal/', data, getAuthHeader())).data,
+  requestWithdrawal: async (amount, iban, otpCode = null) => {
+        const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+        
+        // 🎯 YENİ: Eğer kullanıcı 6 haneli kod girdiyse, paketin (payload) içine ekle
+        const payload = { amount, iban };
+        if (otpCode) {
+            payload.otp_code = otpCode;
+        }
+
+        const response = await axiosInstance.post('auth/wallet/withdraw/', payload, { 
+            headers: { Authorization: `Bearer ${token}` } 
+        });
+        return response.data;
+    },
   getAdminWithdrawals: async () => (await axiosInstance.get(`items/admin-dashboard/withdrawals_list/`, getAuthHeader())).data,
   handleAdminWithdrawal: async (data) => (await axiosInstance.post(`items/admin-dashboard/handle_withdrawal/`, data, getAuthHeader())).data,
   submitReport: async (data) => (await axiosInstance.post("items/reports/submit/", data, getAuthHeader())).data,

@@ -1,14 +1,14 @@
 import axios from 'axios';
-import { toast } from '../utils/alerts'; // Yolu kendi projene göre düzenle
+import { toast } from '../utils/alerts';
 
 const axiosInstance = axios.create({
-    baseURL: 'http://localhost:8000/api/', // Backend'in kök API adresi
+    baseURL: 'http://localhost:8000/api/',
     headers: {
         'Content-Type': 'application/json',
     }
 });
 
-// GİDEN İSTEK (REQUEST) INTERCEPTOR'I
+// GİDEN İSTEK: Her isteğin kafasına Access Token'ı yapıştır
 axiosInstance.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
@@ -17,32 +17,55 @@ axiosInstance.interceptors.request.use(
         }
         return config;
     },
-    (error) => {
-        return Promise.reject(error);
-    }
+    (error) => Promise.reject(error)
 );
 
-// 🎯 YENİ: GELEN YANIT (RESPONSE) INTERCEPTOR'I (401 KORUMASI)
+// 🎯 YENİ: SESSİZ YENİLEME (SILENT REFRESH) MEKANİZMASI
 axiosInstance.interceptors.response.use(
     (response) => {
-        return response; // Hata yoksa aynen devam
+        return response; 
     },
-    (error) => {
-        // Eğer sunucu "Yetkisiz (401)" dediyse ve şu an Login/Register sayfasında değilsek
-        if (error.response && error.response.status === 401) {
-            const currentPath = window.location.pathname;
-            
-            if (currentPath !== '/login' && currentPath !== '/register') {
-                // Tokenları temizle
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('refresh_token');
-                sessionStorage.removeItem('access_token');
-                sessionStorage.removeItem('refresh_token');
+    async (error) => {
+        const originalRequest = error.config;
 
-                toast.fire({ icon: "warning", title: "Oturum süreniz doldu veya yetkiniz yok. Lütfen tekrar giriş yapın." });
+        // Eğer hata 401 ise ve bu istek daha önce tekrar denenmemişse (_retry bayrağı yoksa)
+        if (error.response && error.response.status === 401 && !originalRequest._retry) {
+            originalRequest._retry = true; // Sonsuz döngüyü engellemek için işaretle
+
+            try {
+                const refreshToken = localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token');
                 
-                // Kullanıcıyı login'e şutla (Sayfayı tam yenileyerek)
-                window.location.href = '/login';
+                if (refreshToken) {
+                    // 1. Arka planda sessizce yeni token iste
+                    const response = await axios.post('http://localhost:8000/api/auth/refresh/', {
+                        refresh: refreshToken
+                    });
+
+                    // 2. Yeni gelen Access Token'ı kaydet
+                    const newAccessToken = response.data.access;
+                    
+                    if (localStorage.getItem('access_token')) {
+                        localStorage.setItem('access_token', newAccessToken);
+                    } else {
+                        sessionStorage.setItem('access_token', newAccessToken);
+                    }
+
+                    // 3. Başarısız olan orijinal isteğin başlığını yeni token ile değiştir ve tekrar gönder!
+                    originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+                    return axiosInstance(originalRequest);
+                }
+            } catch (refreshError) {
+                // EĞER REFRESH TOKEN DA ÖLMÜŞSE (Veya Kara Listeye Alınmışsa) İŞTE ŞİMDİ SİSTEMDEN AT!
+                const currentPath = window.location.pathname;
+                if (currentPath !== '/login' && currentPath !== '/register') {
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('refresh_token');
+                    sessionStorage.removeItem('access_token');
+                    sessionStorage.removeItem('refresh_token');
+
+                    toast.fire({ icon: "warning", title: "Oturum süreniz doldu. Lütfen tekrar giriş yapın." });
+                    window.location.href = '/login';
+                }
             }
         }
         return Promise.reject(error);

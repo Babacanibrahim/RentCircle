@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { walletApi } from "../../auth/services/authApi";
-import { motion } from "framer-motion";
+// 🎯 YENİ: AnimatePresence eklendi (Modal animasyonu için)
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "../../../utils/alerts";
 
 const WalletDashboard = () => {
@@ -13,7 +14,10 @@ const WalletDashboard = () => {
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [iban, setIban] = useState("TR");
 
-  // 🎯 YENİ: WebSocket referansı
+  // 🎯 YENİ: 2FA State'leri
+  const [is2FAModalOpen, setIs2FAModalOpen] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+
   const wsRef = useRef(null);
 
   const fetchWallet = async () => {
@@ -28,7 +32,6 @@ const WalletDashboard = () => {
   };
 
   useEffect(() => {
-    // 1. Sayfa yüklendiğinde Iyzico dönüşlerini (URL parametrelerini) kontrol et
     const status = searchParams.get("status");
     if (status === "success") {
       toast.fire({ icon: "success", title: "Ödeme başarılı! Bakiyeniz cüzdanınıza eklendi." });
@@ -38,10 +41,8 @@ const WalletDashboard = () => {
       setSearchParams({});
     }
 
-    // 2. Cüzdan verilerini çek
     fetchWallet();
 
-    // 3. 🎯 CANLI CÜZDAN: WebSocket bağlantısını kur
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
     let pingInterval;
 
@@ -66,7 +67,6 @@ const WalletDashboard = () => {
             const incomingNotif = JSON.parse(event.data);
             if (incomingNotif.type === "pong") return;
 
-            // Eğer bildirim cüzdanla veya kiralamayla ilgiliyse cüzdanı güncelle (Örn: Admin talebi onayladı, kiralama iptal edildi vs.)
             if (["wallet", "booking", "system"].includes(incomingNotif.notification_type)) {
               fetchWallet();
             }
@@ -143,13 +143,45 @@ const WalletDashboard = () => {
     }
 
     try {
+      // 🎯 İlk Deneme: Kodsuz gönderiyoruz.
       await walletApi.requestWithdrawal(amountToWithdraw, iban);
+
+      // Eğer 2FA kapalıysa işlem direkt başarılı olur ve burası çalışır:
       toast.fire({ icon: "success", title: "Para çekme talebiniz başarıyla alındı! Admin onayından sonra IBAN'ınıza gönderilecektir." });
       setWithdrawAmount("");
       setIban("TR");
       fetchWallet();
     } catch (error) {
-      toast.fire({ icon: "error", title: error.response?.data?.error || "Para çekme işlemi başarısız oldu." });
+      // 🛡️ SIFIR GÜVEN YAKALAYICISI: Eğer Backend "Bana 2FA kodu lazım" derse
+      if (error.response?.data?.requires_2fa) {
+        setIs2FAModalOpen(true); // Yüksek güvenlik penceresini aç
+        setOtpCode(""); // Eski şifre varsa temizle
+      } else {
+        toast.fire({ icon: "error", title: error.response?.data?.error || "Para çekme işlemi başarısız oldu." });
+      }
+    }
+  };
+
+  // 🎯 YENİ: 2FA Kodu ile Para Çekme İşlemi (Modal'daki Buton)
+  const confirmWithdrawWith2FA = async () => {
+    if (otpCode.length !== 6) {
+      return toast.fire({ icon: "warning", title: "Lütfen 6 haneli kodu eksiksiz girin." });
+    }
+
+    const amountToWithdraw = parseFloat(withdrawAmount);
+
+    try {
+      // Bu kez paketin içine 6 haneli 2FA kodunu da ekleyip gönderiyoruz
+      await walletApi.requestWithdrawal(amountToWithdraw, iban, otpCode);
+
+      toast.fire({ icon: "success", title: "Güvenlik onayı başarılı! Para çekme talebiniz işleme alındı." });
+      setIs2FAModalOpen(false); // Kalkanı kapat
+      setWithdrawAmount("");
+      setIban("TR");
+      setOtpCode("");
+      fetchWallet();
+    } catch (error) {
+      toast.fire({ icon: "error", title: error.response?.data?.error || "Geçersiz kod veya işlem başarısız." });
     }
   };
 
@@ -160,7 +192,7 @@ const WalletDashboard = () => {
   const isWithdrawDisabled = !withdrawAmount || parseFloat(withdrawAmount) > parseFloat(wallet?.balance) || iban.length !== 26;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10 selection:bg-blue-500/30">
+    <div className="max-w-5xl mx-auto px-4 py-10 selection:bg-blue-500/30 relative">
       <h1 className="text-3xl font-black text-slate-100 mb-8 tracking-tight cursor-default">Dijital Cüzdanım</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
@@ -298,6 +330,53 @@ const WalletDashboard = () => {
           </table>
         )}
       </div>
+
+      {/* 🛡️ 2FA ONAY MODALI (PARA ÇEKME İÇİN) */}
+      <AnimatePresence>
+        {is2FAModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a]/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="cyber-card bg-[#1e293b] border border-blue-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl shadow-blue-500/20 relative">
+              <button
+                onClick={() => setIs2FAModalOpen(false)}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors text-sm font-bold cursor-pointer hover:scale-110 active:scale-90">
+                ✕
+              </button>
+
+              <div className="flex flex-col items-center pt-2">
+                <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/30 rounded-full flex items-center justify-center mb-4">
+                  <span className="text-3xl">🔒</span>
+                </div>
+
+                <h2 className="text-lg font-black text-white text-center mb-2">Güvenlik Onayı Gerekiyor</h2>
+                <p className="text-xs text-slate-300 text-center mb-6 leading-relaxed">
+                  Cüzdanınızdan paranın çıkışına onay vermek için lütfen Authenticator uygulamanızdaki 6 haneli kodu girin.
+                </p>
+
+                <div className="w-full space-y-2 mb-6">
+                  <input
+                    type="text"
+                    maxLength="6"
+                    placeholder="• • • • • •"
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    className="w-full text-center text-2xl tracking-[0.5em] font-mono font-bold bg-[#0f172a] border border-blue-500/50 focus:border-blue-400 text-white rounded-xl p-3 outline-none transition-colors"
+                  />
+                </div>
+
+                <button
+                  onClick={confirmWithdrawWith2FA}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2">
+                  Doğrula ve Çekimi Başlat
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

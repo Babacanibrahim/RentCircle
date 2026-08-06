@@ -48,6 +48,30 @@ export const authApi = {
         const response = await axiosInstance.post('auth/reset-password/', data);
         return response.data;
     },
+
+    // 🎯 2FA İŞLEMLERİ
+    setup2FA: async () => {
+        const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+        const response = await axiosInstance.get('auth/2fa/setup/', { 
+            headers: { Authorization: `Bearer ${token}` } 
+        });
+        return response.data;
+    },
+    verify2FA: async (code) => {
+        const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+        const response = await axiosInstance.post('auth/2fa/verify/', { code }, { 
+            headers: { Authorization: `Bearer ${token}` } 
+        });
+        return response.data;
+    },
+
+    disable2FA: async (code) => {
+        const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+        const response = await axiosInstance.post('auth/2fa/disable/', { code }, { 
+            headers: { Authorization: `Bearer ${token}` } 
+        });
+        return response.data;
+    },
 };
 
 export const walletApi = {
@@ -74,5 +98,6 @@ export const walletApi = {
             headers: { Authorization: `Bearer ${token}` } 
         });
         return response.data;
-    }
+    },
+
 };

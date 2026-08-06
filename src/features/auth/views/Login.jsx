@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams, useLocation } from "react-router-do
 import AuthLayout from "../components/AuthLayout";
 import { authApi } from "../services/authApi";
 import { toast } from "../../../utils/alerts";
+// 🎯 YENİ: Modal animasyonları için
+import { motion, AnimatePresence } from "framer-motion";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -13,6 +15,11 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+
+  // 🎯 YENİ: 2FA State'leri
+  const [is2FAModalOpen, setIs2FAModalOpen] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     const isActivated = searchParams.get("activated");
@@ -27,11 +34,10 @@ const Login = () => {
     }
   }, [searchParams, setSearchParams]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const payload = { email: loginInput.trim(), username: loginInput.trim(), password };
-
+  // Asıl Login isteğini atan fonksiyon
+  const executeLogin = async (payload) => {
     try {
+      setIsSubmitting(true);
       const data = await authApi.login(payload);
 
       let isStaff = false;
@@ -53,6 +59,7 @@ const Login = () => {
       localStorage.setItem("refresh_token", data.refresh);
 
       toast.fire({ icon: "success", title: "Giriş başarılı! Yönlendiriliyorsunuz..." });
+      setIs2FAModalOpen(false); // Modal açıksa kapat
 
       setTimeout(() => {
         let nextUrl = searchParams.get("next") || location.state?.from?.pathname || location.state?.from;
@@ -62,7 +69,9 @@ const Login = () => {
         window.location.href = nextUrl;
       }, 500);
     } catch (err) {
-      // 🛡️ YENİ: Brute-Force Koruması (Rate Limiting 429 Yakalama)
+      setIsSubmitting(false);
+
+      // 🛡️ Brute-Force Yakalama
       if (err.response && err.response.status === 429) {
         return toast.fire({
           icon: "warning",
@@ -70,23 +79,51 @@ const Login = () => {
         });
       }
 
+      const errData = err.response?.data;
+
+      // 🛡️ SIFIR GÜVEN 2FA YAKALAMA: Backend benden 2FA Kodu istiyor!
+      if (errData?.requires_2fa || errData?.detail?.requires_2fa) {
+        setIs2FAModalOpen(true);
+        setOtpCode(""); // Eski kodu temizle
+        return;
+      }
+
+      // Standart Hata Yakalama
       let errMsg = "Giriş yapılamadı. Lütfen bilgilerinizi kontrol edin.";
-      if (err.response?.data) {
-        if (err.response.data.detail === "No active account found with the given credentials") {
+      if (errData) {
+        if (errData.detail === "No active account found with the given credentials") {
           errMsg = "Şifre hatalı veya e-posta adresiniz henüz onaylanmamış olabilir.";
-        } else if (typeof err.response.data === "object") {
-          errMsg = Object.values(err.response.data).flat().join(" ");
+        } else if (errData.error) {
+          errMsg = errData.error;
+        } else if (typeof errData === "object" && !errData.requires_2fa) {
+          errMsg = Object.values(errData).flat().join(" ");
         } else {
-          errMsg = err.response.data.detail || errMsg;
+          errMsg = errData.detail || errMsg;
         }
       }
       toast.fire({ icon: "error", title: errMsg });
     }
   };
 
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const payload = { email: loginInput.trim(), username: loginInput.trim(), password };
+    executeLogin(payload);
+  };
+
+  // 🎯 YENİ: 2FA Modal'ından tetiklenen 2. aşama gönderim
+  const handle2FASubmit = (e) => {
+    e.preventDefault();
+    if (otpCode.length !== 6) {
+      return toast.fire({ icon: "warning", title: "Lütfen 6 haneli kodu eksiksiz girin." });
+    }
+    const payload = { email: loginInput.trim(), username: loginInput.trim(), password, otp_code: otpCode };
+    executeLogin(payload);
+  };
+
   return (
     <AuthLayout title="Tekrar Hoş Geldin" subtitle="Hesabına giriş yap ve topluluğunda güvenle kiralamaya devam et.">
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 relative z-10">
         <div className="space-y-1.5">
           <label className="text-xs font-semibold text-[#cbd5e1] tracking-wide cursor-default">Kullanıcı Adı veya E-posta</label>
           <input
@@ -147,10 +184,62 @@ const Login = () => {
 
         <button
           type="submit"
-          className="btn-gradient w-full p-3.5 mt-2 cursor-pointer hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-blue-500/20">
-          Giriş Yap
+          disabled={isSubmitting}
+          className="btn-gradient w-full p-3.5 mt-2 cursor-pointer disabled:opacity-50 hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-blue-500/20">
+          {isSubmitting && !is2FAModalOpen ? "Giriş Yapılıyor..." : "Giriş Yap"}
         </button>
       </form>
+
+      {/* 🛡️ 2FA ONAY MODALI (LOGIN İÇİN) */}
+      <AnimatePresence>
+        {is2FAModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a]/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="cyber-card bg-[#1e293b] border border-blue-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl shadow-blue-500/20 relative">
+              <button
+                onClick={() => {
+                  setIs2FAModalOpen(false);
+                  setIsSubmitting(false);
+                }}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors text-sm font-bold cursor-pointer hover:scale-110 active:scale-90">
+                ✕
+              </button>
+
+              <div className="flex flex-col items-center pt-2">
+                <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/30 rounded-full flex items-center justify-center mb-4">
+                  <span className="text-3xl">🛡️</span>
+                </div>
+
+                <h2 className="text-lg font-black text-white text-center mb-2">İki Aşamalı Doğrulama</h2>
+                <p className="text-xs text-slate-300 text-center mb-6 leading-relaxed">
+                  Hesabınıza giriş yapmak için lütfen Authenticator uygulamanızdaki 6 haneli kodu girin.
+                </p>
+
+                <form onSubmit={handle2FASubmit} className="w-full space-y-6">
+                  <input
+                    type="text"
+                    maxLength="6"
+                    placeholder="• • • • • •"
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    className="w-full text-center text-2xl tracking-[0.5em] font-mono font-bold bg-[#0f172a] border border-blue-500/50 focus:border-blue-400 text-white rounded-xl p-3 outline-none transition-colors"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2">
+                    {isSubmitting ? "Doğrulanıyor..." : "Kodu Doğrula ve Giriş Yap"}
+                  </button>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </AuthLayout>
   );
 };
