@@ -8,6 +8,10 @@ from django.utils import timezone
 from django.db import models, transaction
 from django.utils.html import strip_tags
 from decimal import Decimal
+from django_otp.plugins.otp_totp.models import TOTPDevice
+import qrcode
+import base64
+from io import BytesIO
 from rest_framework.permissions import AllowAny
 from django.http import HttpResponseRedirect
 from rest_framework.views import APIView
@@ -18,12 +22,13 @@ from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.throttling import ScopedRateThrottle # 🛡️ YENİ: Kalkan kütüphanesi eklendi
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 import iyzipay
 import uuid
 from django.shortcuts import redirect
 from django.contrib.auth import get_user_model
 
-from .serializers import RegisterSerializer, UserProfileSerializer, ChangePasswordSerializer, WalletSerializer
+from .serializers import RegisterSerializer, UserProfileSerializer, ChangePasswordSerializer, WalletSerializer, CustomTokenObtainPairSerializer
 from .models import CustomUser, PasswordResetOTP, Wallet, WalletTransaction, WithdrawalRequest
 
 User = get_user_model()
@@ -282,6 +287,9 @@ class WalletDetailView(APIView):
         data['transactions'] = sorted(data['transactions'], key=lambda x: x['created_at'], reverse=True)[:20]
         return Response(data, status=status.HTTP_200_OK)
 
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: 2FA KORUMALI PARA ÇEKME İŞLEMİ
+# ==========================================
 class RequestWithdrawalView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -289,10 +297,26 @@ class RequestWithdrawalView(APIView):
         wallet = request.user.wallet
         amount = request.data.get('amount')
         iban = request.data.get('iban')
+        otp_code = request.data.get('otp_code') # 🎯 YENİ: Frontend'den gelecek olan 6 haneli kod
 
         if not amount or not iban:
             return Response({"error": "Tutar ve IBAN zorunludur."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 🛡️ YENİ: SIFIR GÜVEN (ZERO-TRUST) 2FA KONTROLÜ
+        if request.user.is_2fa_enabled:
+            # 1. Kullanıcının 2FA'sı açık ama kod göndermemiş
+            if not otp_code:
+                return Response({
+                    "error": "Bu işlem için İki Aşamalı Doğrulama (2FA) kodu gereklidir.", 
+                    "requires_2fa": True # Frontend'in modal açmasını tetikleyecek gizli bayrak
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # 2. Kod göndermiş, cihazı bul ve doğrula
+            device = TOTPDevice.objects.filter(user=request.user, name='default').first()
+            if not device or not device.verify_token(otp_code):
+                return Response({"error": "Geçersiz veya süresi dolmuş 2FA kodu! İşlem reddedildi."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # (Aşağısı eski kodun birebir aynısı, sadece 2FA'yı geçerse çalışacak)
         try:
             amount = Decimal(str(amount))
             if amount <= 0:
@@ -437,3 +461,116 @@ def deposit_callback(request):
             return HttpResponseRedirect("http://localhost:5173/wallet?status=fail")
             
     return HttpResponseRedirect("http://localhost:5173/wallet?status=fail")
+
+
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: 2FA KURULUMU VE QR KOD ÜRETİMİ
+# ==========================================
+class Setup2FAView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            user = request.user
+            
+            # 1. Cihazı bul veya oluştur
+            device = TOTPDevice.objects.filter(user=user, name='default').first()
+            if not device:
+                device = TOTPDevice.objects.create(user=user, name='default', confirmed=False)
+            
+            # 2. 🎯 SİHİRLİ DOKUNUŞ: config_url yerine URL'i kendi ellerimizle oluşturuyoruz (Hata riskini sıfırlar)
+            issuer = "RentCircle"
+            account_name = user.email if user.email else user.username
+            secret_key = base64.b32encode(device.bin_key).decode('utf-8')
+            
+            # Bu link tam olarak Authenticator'ın okuduğu dildir
+            url = f"otpauth://totp/{issuer}:{account_name}?secret={secret_key}&issuer={issuer}"
+            
+            # 3. QR Kodu PNG'ye çevir
+            qr = qrcode.make(url)
+            stream = BytesIO()
+            qr.save(stream, format='PNG')
+            qr_base64 = base64.b64encode(stream.getvalue()).decode('utf-8')
+            
+            # 4. Frontend'e fırlat
+            return Response({
+                "message": "QR kod başarıyla üretildi.",
+                "qr_code": f"data:image/png;base64,{qr_base64}",
+                "secret_key": secret_key
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            # 🚨 EĞER BURASI ÇÖKERSE TERMİNALDE BİZE NEDENİNİ BAĞIRACAK!
+            print(f"❌ [2FA QR KOD HATASI]: {str(e)}")
+            return Response({"error": f"QR Kod üretilirken sunucu hatası: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: 2FA 6 HANELİ KOD DOĞRULAMA
+# ==========================================
+class Verify2FAView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        code = request.data.get('code')
+
+        if not code:
+            return Response({"error": "Lütfen 6 haneli doğrulama kodunu girin."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Kullanıcının cihazını bul
+        device = TOTPDevice.objects.filter(user=user, name='default').first()
+        if not device:
+            return Response({"error": "2FA kurulumu başlatılmamış."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Gelen 6 haneli kod doğru mu? (Zaman bazlı kontrol)
+        if device.verify_token(code):
+            # Doğruysa cihazı onaylanmış olarak işaretle
+            device.confirmed = True
+            device.save()
+            
+            # Kullanıcı modelindeki alanı True yap
+            user.is_2fa_enabled = True
+            user.save()
+            
+            return Response({"message": "İki Aşamalı Doğrulama (2FA) başarıyla aktifleştirildi!"}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "Geçersiz veya süresi dolmuş kod! Lütfen güncel kodu girin."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    # 🎯 SİHİRLİ DOKUNUŞ: Artık standart JWT'yi değil, kendi zırhlı sınıfımızı kullanıyoruz
+    serializer_class = CustomTokenObtainPairSerializer
+    
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login_attempts'
+
+
+# ==========================================
+# 🛡️ GÜVENLİK ZIRHI: 2FA DEVRE DIŞI BIRAKMA (İPTAL)
+# ==========================================
+class Disable2FAView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        code = request.data.get('code')
+
+        if not code:
+            return Response({"error": "Lütfen 6 haneli doğrulama kodunu girin."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Kullanıcının cihazını bul
+        device = TOTPDevice.objects.filter(user=user, name='default').first()
+        if not device:
+            return Response({"error": "Sisteminizde aktif bir 2FA bulunamadı."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Şifre (Kod) doğruysa cihazı SİL ve korumayı kapat
+        if device.verify_token(code):
+            device.delete() # Veritabanından cihazı tamamen uçur
+            
+            user.is_2fa_enabled = False
+            user.save()
+            
+            return Response({"message": "İki Aşamalı Doğrulama (2FA) başarıyla devre dışı bırakıldı."}, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "Geçersiz veya süresi dolmuş kod! İptal işlemi reddedildi."}, status=status.HTTP_400_BAD_REQUEST)

@@ -1,24 +1,17 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.views import TokenRefreshView
 
-# ==========================================
-# 🛡️ GÜVENLİK ZIRHI: Brute-Force (Siber Saldırı) Korumalı Login Sınıfı
-# ==========================================
-class CustomTokenObtainPairView(TokenObtainPairView):
-    throttle_classes = [ScopedRateThrottle]
-    # settings.py'de tanımladığımız '5/min' (Dakikada max 5 deneme) kuralını buraya bağlıyoruz
-    throttle_scope = 'login_attempts' 
-
-from .views import (RegisterView, ActivateAccountView, UserProfileView, LogoutViewSet, 
+# 🎯 DÜZELTME: CustomTokenObtainPairView'ı BURAYA ekledik, kendi asıl yerinden (views.py) çağırıyoruz!
+from .views import (CustomTokenObtainPairView, RegisterView, ActivateAccountView, UserProfileView, LogoutViewSet, 
                     ChangePasswordView, ForgotPasswordRequestView, VerifyOTPView, ResetPasswordConfirmView,
-                    WalletDetailView, RequestWithdrawalView, InitiateDepositView, deposit_callback)
+                    WalletDetailView, RequestWithdrawalView, InitiateDepositView, deposit_callback,
+                    Setup2FAView, Verify2FAView, Disable2FAView)
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='auth_register'),
     path('activate/<str:uidb64>/<str:token>/', ActivateAccountView.as_view(), name='activate_account'),
     
-    # 🎯 GÜNCELLENDİ: Standart login yerine artık bizim kalkanlı logini kullanıyoruz
+    # 🛡️ GÜVENLİK ZIRHI: Artık views.py içindeki gerçek ve 2FA korumalı Login çalışacak!
     path('login/', CustomTokenObtainPairView.as_view(), name='auth_login'),
     
     path('refresh/', TokenRefreshView.as_view(), name='auth_refresh'),
@@ -36,4 +29,8 @@ urlpatterns = [
     path('wallet/withdraw/', RequestWithdrawalView.as_view(), name='wallet_withdraw'),
     path('wallet/deposit/initiate/', InitiateDepositView.as_view(), name='wallet_deposit_initiate'),
     path('wallet/deposit/callback/', deposit_callback, name='wallet_deposit_callback'),
+
+    path('2fa/setup/', Setup2FAView.as_view(), name='2fa_setup'),
+    path('2fa/verify/', Verify2FAView.as_view(), name='2fa_verify'),
+    path('2fa/disable/', Disable2FAView.as_view(), name='2fa_disable'),
 ]

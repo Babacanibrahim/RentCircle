@@ -2,6 +2,9 @@ from rest_framework import serializers
 from .models import CustomUser, Wallet, WalletTransaction, WithdrawalRequest
 from django.contrib.auth import get_user_model
 from datetime import date
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework.exceptions import AuthenticationFailed
+from django_otp.plugins.otp_totp.models import TOTPDevice
 from django.contrib.auth.hashers import check_password
 
 User = get_user_model()
@@ -31,7 +34,7 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'phone', 'city', 'district', 'occupation', 'show_name']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'phone', 'city', 'district', 'occupation', 'show_name', 'is_2fa_enabled']
         read_only_fields = ['id'] 
         
     def validate_email(self, value):
@@ -142,3 +145,32 @@ class RegisterSerializer(serializers.ModelSerializer):
             occupation=validated_data.get('occupation', '')
         )
         return user
+
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        # 1. Önce standart kontrol (Kullanıcı adı ve şifre doğru mu?)
+        # Hatalıysa zaten burada çöküp "Geçersiz şifre" hatası fırlatır.
+        data = super().validate(attrs)
+        
+        # 2. Şifre doğruysa kullanıcının 2FA durumuna bak
+        if self.user.is_2fa_enabled:
+            # İstek gövdesinde 'otp_code' var mı?
+            otp_code = self.initial_data.get('otp_code', None)
+
+            if not otp_code:
+                # 🎯 Frontend'e "Şifre doğru ama 2FA kodunu sor" sinyali gönder
+                raise AuthenticationFailed({
+                    "requires_2fa": True, 
+                    "error": "Lütfen Authenticator uygulamanızdaki 6 haneli kodu girin."
+                })
+            
+            # 3. Eğer kod geldiyse cihazı bul ve doğrula
+            device = TOTPDevice.objects.filter(user=self.user, name='default').first()
+            if not device or not device.verify_token(otp_code):
+                raise AuthenticationFailed({
+                    "error": "Girdiğiniz 2FA kodu geçersiz veya süresi dolmuş."
+                })
+
+        # 2FA kapalıysa veya 6 haneli kod doğruysa Token'ları (Anahtarları) teslim et!
+        return data
