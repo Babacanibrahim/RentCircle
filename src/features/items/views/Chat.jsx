@@ -67,7 +67,6 @@ const Chat = () => {
   const chatContainerRef = useRef(null);
   const wsRef = useRef(null);
 
-  // 🎯 GÜNCELLENDİ: Son görülme state'i eklendi
   const [isPartnerOnline, setIsPartnerOnline] = useState(false);
   const [partnerLastSeen, setPartnerLastSeen] = useState(null);
 
@@ -82,30 +81,25 @@ const Chat = () => {
     }, 100);
   };
 
-  // LOKASYON STATE'LERİ
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [modalMapCenter, setModalMapCenter] = useState([37.7765, 29.0864]);
   const [mapPosition, setMapPosition] = useState(null);
   const [locationAddress, setLocationAddress] = useState("");
   const [locationNote, setLocationNote] = useState("");
 
-  // ARAMA STATE'LERİ
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // TEKLİF STATE'LERİ
   const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
   const [offerPrice, setOfferPrice] = useState("");
   const [offerDates, setOfferDates] = useState({ start_date: "", end_date: "" });
   const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
 
-  // TAKVİM STATE'LERİ
   const [dateRange, setDateRange] = useState([null, null]);
   const [startDate, endDate] = dateRange;
   const [activeItemDetails, setActiveItemDetails] = useState(null);
 
-  // 🎯 YENİ: Gelen ISO tarihini metinlere çeviren fonksiyon
   const formatLastSeen = (isoString) => {
     if (!isoString) return "Yakın zamanda";
 
@@ -139,6 +133,32 @@ const Chat = () => {
 
   const excludedIntervals =
     activeItemDetails?.booked_dates?.map((range) => ({ start: parseISO(range.start), end: parseISO(range.end) })) || [];
+
+  // 🎯 YENİ YARDIMCI FONKSİYON: Tarihleri kontrol edip teklifin hala geçerli olup olmadığını hesaplar
+  const isOfferValidAndAvailable = (msgStartDate, msgEndDate) => {
+    if (!msgStartDate || !msgEndDate) return false;
+
+    // Geçmiş Tarih Kontrolü
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const offerStart = new Date(msgStartDate);
+    if (offerStart < today) return false;
+
+    // Dolu Tarih (Çakışma) Kontrolü
+    const isOverlap = excludedIntervals.some((interval) => {
+      const oStart = new Date(msgStartDate);
+      const oEnd = new Date(msgEndDate);
+      oStart.setHours(0, 0, 0, 0);
+      oEnd.setHours(0, 0, 0, 0);
+      const iStart = new Date(interval.start);
+      const iEnd = new Date(interval.end);
+      iStart.setHours(0, 0, 0, 0);
+      iEnd.setHours(0, 0, 0, 0);
+      return oStart <= iEnd && oEnd >= iStart;
+    });
+
+    return !isOverlap;
+  };
 
   useEffect(() => {
     if (startDate && endDate && activeChat?.item_price) {
@@ -195,13 +215,19 @@ const Chat = () => {
             unread_count: 0,
           });
         }
+
+        if (activeChat && !activeChat.isNew) {
+          const msgData = await itemApi.getMessages(activeChat.id);
+          const fetchedMsgs = msgData.results ? msgData.results : msgData;
+          setMessages((currentMsgs) => (JSON.stringify(currentMsgs) !== JSON.stringify(fetchedMsgs) ? fetchedMsgs : currentMsgs));
+        }
       } catch (err) {
         console.error("Sohbetler yüklenemedi:", err);
       }
     };
 
     fetchConversations();
-    const interval = setInterval(fetchConversations, 5000);
+    const interval = setInterval(fetchConversations, 3000);
     return () => clearInterval(interval);
   }, [searchParams, activeChat]);
 
@@ -233,14 +259,12 @@ const Chat = () => {
       ws.onopen = () => {
         console.log(`Oda ${activeChat.id} için gerçek zamanlı bağlantı kuruldu.`);
 
-        // 1. Tüneli hayatta tutmak için Ping (30 sn)
         pingInterval = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "ping" }));
           }
         }, 30000);
 
-        // 2. Karşı tarafın Online olup olmadığını sormak için Ping (5 sn)
         statusCheckInterval = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN && partner.id) {
             ws.send(JSON.stringify({ type: "check_status", target_user_id: partner.id }));
@@ -255,7 +279,6 @@ const Chat = () => {
 
         if (incomingData.type === "pong") return;
 
-        // Son görülme datasını alıyoruz
         if (incomingData.type === "status_update") {
           if (isSubscribed) {
             setIsPartnerOnline(incomingData.is_online);
@@ -460,6 +483,14 @@ const Chat = () => {
     const deposit = basePrice * 0.15;
     const totalToPay = basePrice + deposit;
 
+    // 🎯 EĞER TEKLİF GEÇERSİZSE VEYA ÇAKIŞIYORSA KİLİTLE!
+    if (!isOfferValidAndAvailable(msg.offer_start_date, msg.offer_end_date)) {
+      return toast.fire({
+        icon: "error",
+        title: "Üzgünüz, bu teklifteki tarihler artık dolu veya geçmişte kaldı! Yeni bir teklif isteyin.",
+      });
+    }
+
     const result = await cyberConfirm.fire({
       title: "Hemen Öde ve Kirala",
       html:
@@ -488,6 +519,10 @@ const Chat = () => {
       toast.fire({ icon: "error", title: error.response?.data?.error || "Ödeme işlemi başarısız oldu." });
       if (error.response?.data?.error?.toLowerCase().includes("yetersiz")) {
         navigate("/wallet");
+      } else if (error.response?.data?.error?.toLowerCase().includes("başka bir kullanıcı")) {
+        // Backend çakışmayı reddederse mesajları sessizce güncelleyelim ki teklif iptal olarak görünsün.
+        const msgData = await itemApi.getMessages(activeChat.id);
+        setMessages(msgData.results ? msgData.results : msgData);
       }
     }
   };
@@ -517,7 +552,7 @@ const Chat = () => {
     setMapPosition([lat, lon]);
     setModalMapCenter([lat, lon]);
     setLocationAddress(result.name || result.display_name.split(",")[0]);
-    setSearchResults([]);
+    searchResults([]);
   };
 
   const openOfferModal = (specificOffer = null) => {
@@ -537,10 +572,28 @@ const Chat = () => {
     setIsOfferModalOpen(true);
   };
 
-  const handleOfferResponse = async (messageId, action) => {
+  const handleOfferResponse = async (msg, action) => {
+    // 🛡️ Satıcı kabul etmeden önce UX açısından uyar
+    if (action === "accept") {
+      const result = await cyberConfirm.fire({
+        title: "Teklifi Onaylıyor musunuz?",
+        html: `Bu teklifi kabul ettiğinizde, <b>${formatReadableDate(msg.offer_start_date)} - ${formatReadableDate(msg.offer_end_date)}</b> tarihleri ile çakışan diğer tüm kullanıcılardan gelen bekleyen teklifler <b>otomatik olarak reddedilecektir.</b><br><br>Onaylıyor musunuz?`,
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonText: "Evet, Kabul Et",
+        cancelButtonText: "Vazgeç",
+      });
+
+      if (!result.isConfirmed) return; // Vazgeçerse işlemi durdur
+    }
+
     try {
-      await itemApi.respondToOffer(messageId, action);
+      // Backend'e sadece ID'yi yolluyoruz
+      await itemApi.respondToOffer(msg.id, action);
+
       toast.fire({ icon: "success", title: action === "accept" ? "Teklif Kabul Edildi!" : "Teklif Reddedildi." });
+
+      // Anında güncel mesajları çekip ekrana yansıt
       const fetchedMessages = await itemApi.getMessages(activeChat.id);
       setMessages(fetchedMessages.results ? fetchedMessages.results : fetchedMessages);
     } catch (error) {
@@ -715,6 +768,11 @@ const Chat = () => {
                     const isMe = String(msg.sender).toLowerCase() === currentUserId;
                     const isSupport = msg.sender_username === "rentcircle_destek" || msg.sender_name === "RentCircle Destek";
 
+                    // 🎯 DURUM KONTROLÜ: Teklifin arka planda iptal olup olmadığını denetle
+                    const isValidOffer = isOfferValidAndAvailable(msg.offer_start_date, msg.offer_end_date);
+                    // Eğer Backend'den "accepted" gelmiş olsa bile tarihler geçmiş/doluysa onu "expired/rejected" gibi göster
+                    const visualOfferStatus = msg.offer_status === "accepted" && !isValidOffer ? "expired" : msg.offer_status;
+
                     if (msg.is_offer) {
                       return (
                         <motion.div
@@ -723,18 +781,20 @@ const Chat = () => {
                           animate={{ opacity: 1, y: 0 }}
                           className={`flex flex-col w-full max-w-[85%] sm:max-w-[380px] ${isMe ? "self-end items-end" : "self-start items-start"}`}>
                           <div
-                            className={`p-4 rounded-2xl shadow-md border transition-all w-full ${msg.offer_status === "accepted" ? "bg-emerald-900/20 border-emerald-500/30" : msg.offer_status === "rejected" ? "bg-rose-900/20 border-rose-500/30" : "bg-amber-900/20 border-amber-500/30"}`}>
+                            className={`p-4 rounded-2xl shadow-md border transition-all w-full ${visualOfferStatus === "accepted" ? "bg-emerald-900/20 border-emerald-500/30" : visualOfferStatus === "rejected" || visualOfferStatus === "expired" ? "bg-rose-900/20 border-rose-500/30 opacity-75" : "bg-amber-900/20 border-amber-500/30"}`}>
                             <div className="flex items-center gap-2 mb-3">
                               <span className="text-lg">🤝</span>
                               <span className="text-xs font-black tracking-widest uppercase text-slate-200">
-                                {isMe ? "GÖNDERDİĞİN TEKLİF" : "YENİ TEKLİF GELDİ"}
+                                {visualOfferStatus === "expired" ? "GEÇERSİZ TEKLİF" : isMe ? "GÖNDERDİĞİN TEKLİF" : "YENİ TEKLİF GELDİ"}
                               </span>
                             </div>
 
-                            <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 mb-3 cursor-default hover:bg-slate-900/70 transition-colors">
+                            <div
+                              className={`bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 mb-3 cursor-default transition-colors ${visualOfferStatus === "expired" ? "line-through text-slate-500" : "hover:bg-slate-900/70"}`}>
                               <div className="flex flex-col gap-1.5 text-center">
                                 <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Kiralama Tarihleri</span>
-                                <span className="font-bold text-slate-200 text-[11px] bg-slate-800/50 py-1.5 rounded-lg border border-slate-700/50">
+                                <span
+                                  className={`font-bold text-[11px] bg-slate-800/50 py-1.5 rounded-lg border border-slate-700/50 ${visualOfferStatus === "expired" ? "text-slate-500" : "text-slate-200"}`}>
                                   {formatReadableDate(msg.offer_start_date)} <span className="text-slate-500 mx-1">→</span>{" "}
                                   {formatReadableDate(msg.offer_end_date)}
                                 </span>
@@ -742,13 +802,16 @@ const Chat = () => {
 
                               <div className="flex justify-between items-center border-t border-slate-700/50 pt-2.5 mt-2.5">
                                 <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Önerilen Fiyat:</span>
-                                <span className="font-black text-amber-400 text-sm">₺{msg.offer_price}</span>
+                                <span
+                                  className={`font-black text-sm ${visualOfferStatus === "expired" ? "text-slate-500" : "text-amber-400"}`}>
+                                  ₺{msg.offer_price}
+                                </span>
                               </div>
                             </div>
 
                             <p className="text-xs text-slate-300 italic mb-4">&quot;{msg.content}&quot;</p>
 
-                            {msg.offer_status === "pending" ? (
+                            {visualOfferStatus === "pending" ? (
                               isMe ? (
                                 <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20 cursor-default">
                                   ⏳ Yanıt bekleniyor...
@@ -757,12 +820,14 @@ const Chat = () => {
                                 <div className="flex flex-col gap-2 w-full">
                                   <div className="flex gap-2">
                                     <button
-                                      onClick={() => handleOfferResponse(msg.id, "reject")}
+                                      // 🎯 DÜZELTME: msg.id YERİNE msg KULLANILDI
+                                      onClick={() => handleOfferResponse(msg, "reject")}
                                       className="flex-1 btn-slate !py-1.5 text-[10px] !text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 cursor-pointer active:scale-95 transition-transform">
                                       Reddet
                                     </button>
                                     <button
-                                      onClick={() => handleOfferResponse(msg.id, "accept")}
+                                      // 🎯 DÜZELTME: msg.id YERİNE msg KULLANILDI
+                                      onClick={() => handleOfferResponse(msg, "accept")}
                                       className="flex-1 btn-gradient !bg-emerald-500 !border-emerald-400 !py-1.5 text-[10px] hover:scale-[1.02] cursor-pointer active:scale-95 transition-transform shadow-lg shadow-emerald-500/20">
                                       Kabul Et
                                     </button>
@@ -776,7 +841,7 @@ const Chat = () => {
                                   </button>
                                 </div>
                               )
-                            ) : msg.offer_status === "accepted" ? (
+                            ) : visualOfferStatus === "accepted" ? (
                               <div className="flex flex-col gap-2 w-full mt-2">
                                 <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 cursor-default">
                                   ✅ Teklif Kabul Edildi
@@ -788,6 +853,10 @@ const Chat = () => {
                                     💳 Kirala ve Öde
                                   </button>
                                 )}
+                              </div>
+                            ) : visualOfferStatus === "expired" ? (
+                              <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-rose-500/5 text-rose-400/80 font-bold border border-rose-500/10 cursor-not-allowed">
+                                ❌ İptal Edildi (Tarihler Dolu/Geçmiş)
                               </div>
                             ) : (
                               <div className="text-[10px] text-center w-full py-1.5 rounded-lg bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20 cursor-default">
@@ -853,12 +922,14 @@ const Chat = () => {
                               ) : (
                                 <div className="flex gap-2 mb-3">
                                   <button
-                                    onClick={() => handleOfferResponse(msg.id, "reject")}
+                                    // 🎯 DÜZELTME: msg.id YERİNE msg KULLANILDI
+                                    onClick={() => handleOfferResponse(msg, "reject")}
                                     className="flex-1 btn-slate !py-2 text-[10px] !text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 cursor-pointer active:scale-95 transition-transform">
                                     Reddet
                                   </button>
                                   <button
-                                    onClick={() => handleOfferResponse(msg.id, "accept")}
+                                    // 🎯 DÜZELTME: msg.id YERİNE msg KULLANILDI
+                                    onClick={() => handleOfferResponse(msg, "accept")}
                                     className="flex-1 btn-gradient !bg-emerald-500 !border-emerald-400 !py-2 text-[10px] cursor-pointer active:scale-95 transition-transform shadow-lg shadow-emerald-500/20">
                                     Kabul Et
                                   </button>

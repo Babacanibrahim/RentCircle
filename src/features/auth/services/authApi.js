@@ -1,6 +1,7 @@
 import axiosInstance from '../../../config/axiosInstance';
 
 export const authApi = {
+    // --- KİMLİK DOĞRULAMA (AUTH) ---
     register: async (userData) => {
         const response = await axiosInstance.post('auth/register/', userData);
         return response.data;
@@ -18,13 +19,12 @@ export const authApi = {
         return response.data;
     },
 
-    // 🎯 DÜZELTME BURADA: Eğer customToken gelirse (Login olurken), onu kullan. Yoksa localStorage'dan al.
+    // --- PROFİL VE ŞİFRE İŞLEMLERİ ---
     getProfile: async (customToken = null) => {
         const token = customToken || localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
         const response = await axiosInstance.get('auth/me/', { headers: { Authorization: `Bearer ${token}` } });
         return response.data;
     },
-    
     updateProfile: async (profileData) => {
         const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
         const response = await axiosInstance.patch('auth/me/', profileData, { headers: { Authorization: `Bearer ${token}` } });
@@ -35,7 +35,6 @@ export const authApi = {
         const response = await axiosInstance.post('auth/change-password/', passwordData, { headers: { Authorization: `Bearer ${token}` } });
         return response.data;
     },
-
     forgotPasswordRequest: async (data) => {
         const response = await axiosInstance.post('auth/forgot-password/', data);
         return response.data;
@@ -49,7 +48,7 @@ export const authApi = {
         return response.data;
     },
 
-    // 🎯 2FA İŞLEMLERİ
+    // --- 2FA İŞLEMLERİ ---
     setup2FA: async () => {
         const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
         const response = await axiosInstance.get('auth/2fa/setup/', { 
@@ -64,17 +63,17 @@ export const authApi = {
         });
         return response.data;
     },
-
     disable2FA: async (code) => {
         const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
         const response = await axiosInstance.post('auth/2fa/disable/', { code }, { 
             headers: { Authorization: `Bearer ${token}` } 
         });
         return response.data;
-    },
+    }
 };
 
 export const walletApi = {
+    // --- CÜZDAN İŞLEMLERİ ---
     getWalletDetails: async () => {
         const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
         const response = await axiosInstance.get('auth/wallet/', { 
@@ -88,16 +87,21 @@ export const walletApi = {
         const response = await axiosInstance.post('auth/wallet/deposit/initiate/', { amount }, { 
             headers: { Authorization: `Bearer ${token}` } 
         });
-        const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data;
-        return data;
+        return typeof response.data === "string" ? JSON.parse(response.data) : response.data;
     },
     
-    requestWithdrawal: async (amount, iban) => {
+    // 🎯 DÜZELTME BURADA: 403 Hatasını çözen 2FA Kod gönderim mantığı asıl yeri olan buraya eklendi!
+    requestWithdrawal: async (amount, iban, otpCode = null) => {
         const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-        const response = await axiosInstance.post('auth/wallet/withdraw/', { amount, iban }, { 
+        
+        const payload = { amount, iban };
+        if (otpCode) {
+            payload.otp_code = otpCode;
+        }
+
+        const response = await axiosInstance.post('auth/wallet/withdraw/', payload, { 
             headers: { Authorization: `Bearer ${token}` } 
         });
         return response.data;
     },
-
 };

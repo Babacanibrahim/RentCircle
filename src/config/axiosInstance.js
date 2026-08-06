@@ -15,6 +15,11 @@ axiosInstance.interceptors.request.use(
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
+        
+        if (config.data instanceof FormData) {
+            delete config.headers['Content-Type'];
+        }
+        
         return config;
     },
     (error) => Promise.reject(error)
@@ -33,28 +38,36 @@ axiosInstance.interceptors.response.use(
             originalRequest._retry = true; // Sonsuz döngüyü engellemek için işaretle
 
             try {
-                const refreshToken = localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token');
-                
-                if (refreshToken) {
-                    // 1. Arka planda sessizce yeni token iste
-                    const response = await axios.post('http://localhost:8000/api/auth/refresh/', {
-                        refresh: refreshToken
-                    });
+    const refreshToken = localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token');
+    
+    if (refreshToken) {
+        // 1. Arka planda yeni token'ları iste
+        const response = await axios.post('http://localhost:8000/api/auth/refresh/', {
+            refresh: refreshToken
+        });
 
-                    // 2. Yeni gelen Access Token'ı kaydet
-                    const newAccessToken = response.data.access;
-                    
-                    if (localStorage.getItem('access_token')) {
-                        localStorage.setItem('access_token', newAccessToken);
-                    } else {
-                        sessionStorage.setItem('access_token', newAccessToken);
-                    }
+        const newAccessToken = response.data.access;
+        // 🎯 EKSİK Olan Parça Burası: Sunucunun döndüğü yeni Refresh Token'ı da alıyoruz!
+        const newRefreshToken = response.data.refresh; 
+        
+        // 2. Token'ları depolara güncel olarak kaydet
+        if (localStorage.getItem('access_token')) {
+            localStorage.setItem('access_token', newAccessToken);
+            if (newRefreshToken) {
+                localStorage.setItem('refresh_token', newRefreshToken); // 👈 YENİ REFRESH TOKEN KAYDEDİLİYOR
+            }
+        } else {
+            sessionStorage.setItem('access_token', newAccessToken);
+            if (newRefreshToken) {
+                sessionStorage.setItem('refresh_token', newRefreshToken); // 👈 YENİ REFRESH TOKEN KAYDEDİLİYOR
+            }
+        }
 
-                    // 3. Başarısız olan orijinal isteğin başlığını yeni token ile değiştir ve tekrar gönder!
-                    originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-                    return axiosInstance(originalRequest);
-                }
-            } catch (refreshError) {
+        // 3. Başarısız olan orijinal isteği yeni access token ile tekrar gönder
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        return axiosInstance(originalRequest);
+    }
+} catch (refreshError) {
                 // EĞER REFRESH TOKEN DA ÖLMÜŞSE (Veya Kara Listeye Alınmışsa) İŞTE ŞİMDİ SİSTEMDEN AT!
                 const currentPath = window.location.pathname;
                 if (currentPath !== '/login' && currentPath !== '/register') {

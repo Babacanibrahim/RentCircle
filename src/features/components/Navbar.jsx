@@ -362,12 +362,15 @@ const Navbar = ({ onLocationFilter }) => {
 
     if (isSuccess) {
       return {
-        icon: "✅",
+        // 🎯 GÜNCELLENDİ: Eğer başarılı olan şey 'wallet' ise Para İkonu yap, değilse standart Tik yap
+        icon: type === "wallet" ? "💸" : "✅",
         bg: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-        path: type === "booking" ? "/bookings" : "/history",
+        // 🎯 GÜNCELLENDİ: Booking ise '/bookings'e, Wallet ise '/wallet'a, hiçbiri değilse '/history'e at
+        path: type === "booking" ? "/bookings" : type === "wallet" ? "/wallet" : "/history",
       };
     }
 
+    // Aşağıdaki switch bloğu aynı kalacak...
     switch (type) {
       case "wallet":
         return { icon: "💸", bg: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", path: "/wallet" };
