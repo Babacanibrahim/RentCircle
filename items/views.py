@@ -258,6 +258,15 @@ class ItemViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def perform_create(self, serializer):
+        user = self.request.user
+        
+        # 🛡️ İLAN YASAĞI KONTROLÜ
+        is_item_banned = not getattr(user, 'can_post_items', True) or (getattr(user, 'item_ban_until', None) and user.item_ban_until > timezone.now())
+        if is_item_banned:
+            # 🎯 DÜZELTME: timezone.localtime eklendi!
+            date_str = timezone.localtime(user.item_ban_until).strftime('%d.%m.%Y %H:%M') if getattr(user, 'item_ban_until', None) else "Süresiz"
+            raise DRFValidationError({"error": f"Sisteme ilan ekleme yasağınız {date_str} tarihine kadar devam etmektedir. Sebep: {user.item_ban_reason}"})
+
         images = self.request.FILES.getlist('images')
         
         if not images:
@@ -661,6 +670,13 @@ class ConversationViewSet(viewsets.ModelViewSet):
     serializer_class = ConversationSerializer
     permission_classes = [IsAuthenticated]
 
+    def check_message_ban(self, user):
+        is_message_banned = not getattr(user, 'can_send_messages', True) or (getattr(user, 'message_ban_until', None) and user.message_ban_until > timezone.now())
+        if is_message_banned:
+            # 🎯 DÜZELTME: timezone.localtime eklendi!
+            date_str = timezone.localtime(user.message_ban_until).strftime('%d.%m.%Y %H:%M') if getattr(user, 'message_ban_until', None) else "Süresiz"
+            raise DRFValidationError({"error": f"Susturma (Mesaj/Teklif) yasağınız {date_str} tarihine kadar devam etmektedir. Sebep: {user.message_ban_reason}"})
+
     def get_queryset(self):
         user = self.request.user
         return Conversation.objects.filter(Q(renter=user) | Q(owner=user))
@@ -693,6 +709,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def send_message(self, request, pk=None):
+        self.check_message_ban(request.user)
+
         conversation = self.get_object()
         content = request.data.get('content', '')
         
@@ -740,6 +758,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def send_direct_message(self, request):
+        self.check_message_ban(request.user)
+        
         item_id = request.data.get('item_id')
         content = request.data.get('content', '')
         
@@ -792,6 +812,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def respond_offer(self, request):
+        self.check_message_ban(request.user)
+
         message_id = request.data.get('message_id')
         action_type = request.data.get('action')
 
@@ -1060,7 +1082,23 @@ class AdminDashboardViewSet(viewsets.ViewSet):
             "is_staff": u.is_staff,
             "trust_score": getattr(u, 'trust_score', 5.0),
             "wallet_balance": u.wallet.balance if hasattr(u, 'wallet') else Decimal('0.00'),
-            "date_joined": u.date_joined.strftime('%Y-%m-%d %H:%M')
+            "date_joined": u.date_joined.strftime('%Y-%m-%d %H:%M'),
+            
+            # 🎯 DÜZELTME: CEZA DURUMLARI VE "KALICI MI?" BİLGİSİ EKLENDİ
+            "is_account_banned": not u.is_active or (u.banned_until and u.banned_until > timezone.now()),
+            "account_ban_reason": getattr(u, 'ban_reason', None),
+            "account_banned_until": timezone.localtime(u.banned_until).strftime('%d.%m.%Y %H:%M') if u.banned_until else None,
+            "is_account_permanent": bool(u.banned_until and u.banned_until.year > 2100), # 100 yıl atıldığı için > 2100 ise kalıcıdır
+            
+            "is_item_banned": not u.can_post_items or (u.item_ban_until and u.item_ban_until > timezone.now()),
+            "item_ban_reason": getattr(u, 'item_ban_reason', None),
+            "item_banned_until": timezone.localtime(u.item_ban_until).strftime('%d.%m.%Y %H:%M') if u.item_ban_until else None,
+            "is_item_permanent": bool(u.item_ban_until and u.item_ban_until.year > 2100),
+            
+            "is_message_banned": not u.can_send_messages or (u.message_ban_until and u.message_ban_until > timezone.now()),
+            "message_ban_reason": getattr(u, 'message_ban_reason', None),
+            "message_banned_until": timezone.localtime(u.message_ban_until).strftime('%d.%m.%Y %H:%M') if u.message_ban_until else None,
+            "is_message_permanent": bool(u.message_ban_until and u.message_ban_until.year > 2100)
         } for u in users]
         
         return Response(data, status=status.HTTP_200_OK)
@@ -1111,34 +1149,72 @@ class AdminDashboardViewSet(viewsets.ViewSet):
         entity_id = request.data.get('id')
         duration = request.data.get('duration') 
         reason = request.data.get('reason', 'Topluluk kurallarını ihlal ettiniz.')
+        # 🚀 YENİ: Hangi cezanın verileceğini belirler (account, item_post, messaging)
+        penalty_type = request.data.get('penalty_type', 'account')
 
+        # Süre Hesaplama
         banned_until = None
-        if duration == '1_week':
+        if duration == '1_day':
+            banned_until = timezone.now() + timedelta(days=1)
+        elif duration == '1_week':
             banned_until = timezone.now() + timedelta(days=7)
         elif duration == '1_month':
             banned_until = timezone.now() + timedelta(days=30)
         elif duration == 'permanent':
-            banned_until = timezone.now() + timedelta(days=36500) 
+            banned_until = timezone.now() + timedelta(days=36500)
 
+        # 🎯 HEDEF: KULLANICI İSE
         if target_type == 'user':
             target_user = get_object_or_404(User, id=entity_id)
+            
+            # --- CEZAYI KALDIRMA İŞLEMİ ---
             if duration == 'remove_ban':
-                target_user.banned_until = None
-                target_user.ban_reason = None
-                target_user.is_active = True
-                msg = "Hesabınızın kısıtlaması kaldırılmıştır."
+                if penalty_type == 'account':
+                    target_user.banned_until = None
+                    target_user.ban_reason = None
+                    target_user.is_active = True
+                    msg = "Hesabınızın giriş yasağı kaldırılmıştır."
+                elif penalty_type == 'item_post':
+                    target_user.item_ban_until = None
+                    target_user.item_ban_reason = None
+                    target_user.can_post_items = True
+                    msg = "İlan paylaşma yasağınız kaldırılmıştır."
+                elif penalty_type == 'messaging':
+                    target_user.message_ban_until = None
+                    target_user.message_ban_reason = None
+                    target_user.can_send_messages = True
+                    msg = "Mesajlaşma (Susturma) cezanız kaldırılmıştır."
+
+                target_user.save()
+                Notification.objects.create(user=target_user, notification_type='system', message=msg)
+                return Response({"message": f"Kullanıcının {penalty_type} yasağı başarıyla kaldırıldı."})
+
+            # --- CEZA VERME İŞLEMİ ---
             else:
-                target_user.banned_until = banned_until
-                target_user.ban_reason = reason
-                if duration == 'permanent':
-                    target_user.is_active = False 
-                msg = f"Hesabınız sistem tarafından askıya alınmıştır. Sebep: {reason}"
+                if penalty_type == 'account':
+                    target_user.banned_until = banned_until
+                    target_user.ban_reason = reason
+                    target_user.is_active = False # Tam ban yiyen zaten giremez, o yüzden anında atıyoruz
+                    msg = f"Hesabınız sistem tarafından askıya alınmıştır. Sebep: {reason}"
+                    
+                elif penalty_type == 'item_post':
+                    target_user.item_ban_until = banned_until
+                    target_user.item_ban_reason = reason
+                    target_user.can_post_items = False
+                    msg = f"Sisteme yeni ilan ekleme yetkiniz kısıtlanmıştır. Sebep: {reason}"
+                    
+                elif penalty_type == 'messaging':
+                    target_user.message_ban_until = banned_until
+                    target_user.message_ban_reason = reason
+                    target_user.can_send_messages = False
+                    msg = f"Mesaj gönderme ve teklif verme yetkiniz (Susturma) kısıtlanmıştır. Sebep: {reason}"
 
-            target_user.save()
-            ActivityLog.objects.create(user=request.user, action_type="MODERASYON", description=f"@{target_user.username} kullanıcısına {duration} kısıtlaması.")
-            Notification.objects.create(user=target_user, notification_type='system', message=msg)
-            return Response({"message": "Kullanıcı banlandı ve bilgilendirildi."})
+                target_user.save()
+                ActivityLog.objects.create(user=request.user, action_type="MODERASYON", description=f"@{target_user.username} kullanıcısına {duration} süreli {penalty_type} cezası verildi.")
+                Notification.objects.create(user=target_user, notification_type='system', message=msg)
+                return Response({"message": "Kullanıcıya başarılı bir şekilde ceza uygulandı ve bildirildi."})
 
+        # 🎯 HEDEF: İLAN İSE (Mevcut mantık değişmedi)
         elif target_type == 'item':
             item = get_object_or_404(Item, id=entity_id)
             if duration == 'remove_ban':

@@ -21,6 +21,14 @@ class CustomUser(AbstractUser):
     is_active = models.BooleanField(default=False)
     is_2fa_enabled = models.BooleanField(default=False)
 
+
+    can_post_items = models.BooleanField(default=True)
+    item_ban_until = models.DateTimeField(null=True, blank=True)
+    item_ban_reason = models.TextField(null=True, blank=True)
+
+    can_send_messages = models.BooleanField(default=True)
+    message_ban_until = models.DateTimeField(null=True, blank=True)
+    message_ban_reason = models.TextField(null=True, blank=True)
     banned_until = models.DateTimeField(null=True, blank=True, help_text="Kullanıcının banının açılacağı tarih. Süresiz ban için çok ileri bir tarih verilebilir.")
     ban_reason = models.TextField(null=True, blank=True, help_text="Kullanıcıya gösterilecek banlanma sebebi/mesajı.")
     

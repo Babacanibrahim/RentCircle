@@ -136,7 +136,8 @@ class ItemSerializer(serializers.ModelSerializer):
             'is_favorite', 'next_available_date', 'is_currently_rented',
             'reviews', 'owner_show_name', 'owner_first_name', 'owner_last_name', 
             'owner_username', 'owner_rating', 'owner_review_count',
-            'booked_dates', 'views_count', 'favorites_count'
+            'booked_dates', 'views_count', 'favorites_count',
+            'is_banned', 'banned_until', 'ban_reason'
         ]
         read_only_fields = ['owner']
    
