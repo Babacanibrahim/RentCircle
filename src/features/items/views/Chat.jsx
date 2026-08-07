@@ -62,7 +62,9 @@ const Chat = () => {
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
+
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [currentUserBans, setCurrentUserBans] = useState({ is_message_banned: false, message_ban_reason: "", message_ban_until: "" });
 
   const chatContainerRef = useRef(null);
   const wsRef = useRef(null);
@@ -134,17 +136,14 @@ const Chat = () => {
   const excludedIntervals =
     activeItemDetails?.booked_dates?.map((range) => ({ start: parseISO(range.start), end: parseISO(range.end) })) || [];
 
-  // 🎯 YENİ YARDIMCI FONKSİYON: Tarihleri kontrol edip teklifin hala geçerli olup olmadığını hesaplar
   const isOfferValidAndAvailable = (msgStartDate, msgEndDate) => {
     if (!msgStartDate || !msgEndDate) return false;
 
-    // Geçmiş Tarih Kontrolü
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const offerStart = new Date(msgStartDate);
     if (offerStart < today) return false;
 
-    // Dolu Tarih (Çakışma) Kontrolü
     const isOverlap = excludedIntervals.some((interval) => {
       const oStart = new Date(msgStartDate);
       const oEnd = new Date(msgEndDate);
@@ -175,20 +174,43 @@ const Chat = () => {
     }
   }, [startDate, endDate, activeChat]);
 
+  // 🛡️ SIFIR GECİKMELİ (REAL-TIME) CEZA KONTROLÜ
   useEffect(() => {
-    const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-    if (token) {
-      try {
-        const base64Url = token.split(".")[1];
-        const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-        const payload = JSON.parse(window.atob(base64));
-        setCurrentUserId(String(payload.user_id).toLowerCase());
-      } catch (e) {
-        console.error("Token çözümlenemedi:", e);
+    const fetchBanStatus = async () => {
+      const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+      if (token) {
+        try {
+          const base64Url = token.split(".")[1];
+          const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+          const payload = JSON.parse(window.atob(base64));
+          setCurrentUserId(String(payload.user_id).toLowerCase());
+
+          const res = await axios.get("http://localhost:8000/api/auth/me/", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          setCurrentUserBans((prev) => {
+            if (prev.is_message_banned === res.data.is_message_banned && prev.message_ban_until === res.data.message_ban_until_formatted) {
+              return prev;
+            }
+            return {
+              is_message_banned: res.data.is_message_banned,
+              message_ban_reason: res.data.message_ban_reason,
+              message_ban_until: res.data.message_ban_until_formatted,
+            };
+          });
+        } catch (e) {
+          console.error("Profil çekilemedi:", e);
+        }
+      } else {
+        navigate("/login");
       }
-    } else {
-      navigate("/login");
-    }
+    };
+
+    fetchBanStatus();
+
+    const banInterval = setInterval(fetchBanStatus, 3000);
+    return () => clearInterval(banInterval);
   }, [navigate]);
 
   useEffect(() => {
@@ -483,7 +505,6 @@ const Chat = () => {
     const deposit = basePrice * 0.15;
     const totalToPay = basePrice + deposit;
 
-    // 🎯 EĞER TEKLİF GEÇERSİZSE VEYA ÇAKIŞIYORSA KİLİTLE!
     if (!isOfferValidAndAvailable(msg.offer_start_date, msg.offer_end_date)) {
       return toast.fire({
         icon: "error",
@@ -520,7 +541,6 @@ const Chat = () => {
       if (error.response?.data?.error?.toLowerCase().includes("yetersiz")) {
         navigate("/wallet");
       } else if (error.response?.data?.error?.toLowerCase().includes("başka bir kullanıcı")) {
-        // Backend çakışmayı reddederse mesajları sessizce güncelleyelim ki teklif iptal olarak görünsün.
         const msgData = await itemApi.getMessages(activeChat.id);
         setMessages(msgData.results ? msgData.results : msgData);
       }
@@ -573,7 +593,6 @@ const Chat = () => {
   };
 
   const handleOfferResponse = async (msg, action) => {
-    // 🛡️ Satıcı kabul etmeden önce UX açısından uyar
     if (action === "accept") {
       const result = await cyberConfirm.fire({
         title: "Teklifi Onaylıyor musunuz?",
@@ -584,16 +603,12 @@ const Chat = () => {
         cancelButtonText: "Vazgeç",
       });
 
-      if (!result.isConfirmed) return; // Vazgeçerse işlemi durdur
+      if (!result.isConfirmed) return;
     }
 
     try {
-      // Backend'e sadece ID'yi yolluyoruz
       await itemApi.respondToOffer(msg.id, action);
-
       toast.fire({ icon: "success", title: action === "accept" ? "Teklif Kabul Edildi!" : "Teklif Reddedildi." });
-
-      // Anında güncel mesajları çekip ekrana yansıt
       const fetchedMessages = await itemApi.getMessages(activeChat.id);
       setMessages(fetchedMessages.results ? fetchedMessages.results : fetchedMessages);
     } catch (error) {
@@ -768,9 +783,7 @@ const Chat = () => {
                     const isMe = String(msg.sender).toLowerCase() === currentUserId;
                     const isSupport = msg.sender_username === "rentcircle_destek" || msg.sender_name === "RentCircle Destek";
 
-                    // 🎯 DURUM KONTROLÜ: Teklifin arka planda iptal olup olmadığını denetle
                     const isValidOffer = isOfferValidAndAvailable(msg.offer_start_date, msg.offer_end_date);
-                    // Eğer Backend'den "accepted" gelmiş olsa bile tarihler geçmiş/doluysa onu "expired/rejected" gibi göster
                     const visualOfferStatus = msg.offer_status === "accepted" && !isValidOffer ? "expired" : msg.offer_status;
 
                     if (msg.is_offer) {
@@ -820,13 +833,11 @@ const Chat = () => {
                                 <div className="flex flex-col gap-2 w-full">
                                   <div className="flex gap-2">
                                     <button
-                                      // 🎯 DÜZELTME: msg.id YERİNE msg KULLANILDI
                                       onClick={() => handleOfferResponse(msg, "reject")}
                                       className="flex-1 btn-slate !py-1.5 text-[10px] !text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 cursor-pointer active:scale-95 transition-transform">
                                       Reddet
                                     </button>
                                     <button
-                                      // 🎯 DÜZELTME: msg.id YERİNE msg KULLANILDI
                                       onClick={() => handleOfferResponse(msg, "accept")}
                                       className="flex-1 btn-gradient !bg-emerald-500 !border-emerald-400 !py-1.5 text-[10px] hover:scale-[1.02] cursor-pointer active:scale-95 transition-transform shadow-lg shadow-emerald-500/20">
                                       Kabul Et
@@ -922,13 +933,11 @@ const Chat = () => {
                               ) : (
                                 <div className="flex gap-2 mb-3">
                                   <button
-                                    // 🎯 DÜZELTME: msg.id YERİNE msg KULLANILDI
                                     onClick={() => handleOfferResponse(msg, "reject")}
                                     className="flex-1 btn-slate !py-2 text-[10px] !text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/30 cursor-pointer active:scale-95 transition-transform">
                                     Reddet
                                   </button>
                                   <button
-                                    // 🎯 DÜZELTME: msg.id YERİNE msg KULLANILDI
                                     onClick={() => handleOfferResponse(msg, "accept")}
                                     className="flex-1 btn-gradient !bg-emerald-500 !border-emerald-400 !py-2 text-[10px] cursor-pointer active:scale-95 transition-transform shadow-lg shadow-emerald-500/20">
                                     Kabul Et
@@ -1004,38 +1013,47 @@ const Chat = () => {
               </div>
 
               {/* MESAJ YAZMA ALANI VE BUTONLAR */}
-              <form onSubmit={handleSendMessage} className="p-4 border-t border-[#475569]/40 bg-[#0f172a]/30 flex gap-2.5 items-center">
-                <button
-                  type="button"
-                  onClick={() => setIsLocationModalOpen(true)}
-                  className="w-12 h-12 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-xl hover:bg-slate-700 hover:border-blue-400 transition-colors cursor-pointer active:scale-90 flex-shrink-0 shadow-sm"
-                  title="Buluşma Noktası Öner">
-                  📍
-                </button>
+              {currentUserBans.is_message_banned ? (
+                <div className="p-4 border-t border-rose-500/40 bg-rose-500/10 flex flex-col items-center justify-center text-center rounded-b-2xl">
+                  <span className="text-2xl mb-1">🔇</span>
+                  <div className="text-rose-500 font-bold text-sm tracking-wider uppercase">Mesajlaşma Özelliğiniz Kısıtlanmıştır</div>
+                  <div className="text-rose-400 text-xs font-bold mt-1">Bitiş: {currentUserBans.message_ban_until}</div>
+                  <div className="text-rose-400 text-[10px] italic mt-1 max-w-sm">Sebep: "{currentUserBans.message_ban_reason}"</div>
+                </div>
+              ) : (
+                <form onSubmit={handleSendMessage} className="p-4 border-t border-[#475569]/40 bg-[#0f172a]/30 flex gap-2.5 items-center">
+                  <button
+                    type="button"
+                    onClick={() => setIsLocationModalOpen(true)}
+                    className="w-12 h-12 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-xl hover:bg-slate-700 hover:border-blue-400 transition-colors cursor-pointer active:scale-90 flex-shrink-0 shadow-sm"
+                    title="Buluşma Noktası Öner">
+                    📍
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => openOfferModal()}
-                  className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/40 flex items-center justify-center text-xl hover:bg-amber-500/20 hover:border-amber-400 transition-colors cursor-pointer active:scale-90 flex-shrink-0 shadow-sm"
-                  title="Yeni Teklif Öner">
-                  🤝
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => openOfferModal()}
+                    className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/40 flex items-center justify-center text-xl hover:bg-amber-500/20 hover:border-amber-400 transition-colors cursor-pointer active:scale-90 flex-shrink-0 shadow-sm"
+                    title="Yeni Teklif Öner">
+                    🤝
+                  </button>
 
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Mesajınızı yazın..."
-                  className="cyber-input flex-1 !rounded-full !px-5 !py-3 border-[#475569]/50 shadow-inner hover:border-blue-500/50 focus:border-blue-500 transition-colors"
-                />
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder="Mesajınızı yazın..."
+                    className="cyber-input flex-1 !rounded-full !px-5 !py-3 border-[#475569]/50 shadow-inner hover:border-blue-500/50 focus:border-blue-500 transition-colors"
+                  />
 
-                <button
-                  type="submit"
-                  disabled={!newMessage.trim()}
-                  className={`btn-gradient !rounded-full !px-6 !py-3 h-full flex items-center justify-center font-bold tracking-wider uppercase transition-all shrink-0 ${!newMessage.trim() ? "opacity-30 cursor-not-allowed shadow-none" : "cursor-pointer hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20"}`}>
-                  Gönder 🚀
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    disabled={!newMessage.trim()}
+                    className={`btn-gradient !rounded-full !px-6 !py-3 h-full flex items-center justify-center font-bold tracking-wider uppercase transition-all shrink-0 ${!newMessage.trim() ? "opacity-30 cursor-not-allowed shadow-none" : "cursor-pointer hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/20"}`}>
+                    Gönder 🚀
+                  </button>
+                </form>
+              )}
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center flex-col text-slate-500 p-6">

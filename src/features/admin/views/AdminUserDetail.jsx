@@ -16,9 +16,9 @@ const AdminUserDetail = () => {
   const [walletAmount, setWalletAmount] = useState("");
   const [isProcessingWallet, setIsProcessingWallet] = useState(false);
 
-  // Ban İşlemleri State
+  // 🎯 YENİ: Gelişmiş Ban İşlemleri State (penalty_type Eklendi)
   const [isBanModalOpen, setIsBanModalOpen] = useState(false);
-  const [banForm, setBanForm] = useState({ duration: "1_week", reason: "" });
+  const [banForm, setBanForm] = useState({ penalty_type: "account", duration: "1_week", reason: "" });
   const [isProcessingBan, setIsProcessingBan] = useState(false);
 
   const [supportMessage, setSupportMessage] = useState("");
@@ -26,7 +26,6 @@ const AdminUserDetail = () => {
 
   const fetchUserDetails = async () => {
     try {
-      // 1. Tüm kullanıcıları ve ilanları çek (Backend'de tekil uç nokta yoksa filtreleyerek buluruz)
       const users = await itemApi.getAdminUsers("");
       const targetUser = users.find((u) => String(u.id) === String(id));
 
@@ -80,7 +79,7 @@ const AdminUserDetail = () => {
         });
         toast.fire({ icon: "success", title: response.message });
         setWalletAmount("");
-        fetchUserDetails(); // Veriyi yenile
+        fetchUserDetails();
       } catch (error) {
         toast.fire({ icon: "error", title: error.response?.data?.error || "Bakiye işlemi başarısız oldu." });
       } finally {
@@ -103,7 +102,7 @@ const AdminUserDetail = () => {
     }
   };
 
-  // --- SÜRELİ / SÜRESİZ BAN ---
+  // 🎯 YENİ: ÇOK KATMANLI CEZA GÖNDERİMİ
   const handleBanSubmit = async (e) => {
     e.preventDefault();
     if (!banForm.reason.trim()) {
@@ -115,10 +114,11 @@ const AdminUserDetail = () => {
       await itemApi.banEntity({
         target_type: "user",
         id: user.id,
+        penalty_type: banForm.penalty_type, // Ceza türü gönderiliyor
         duration: banForm.duration,
         reason: banForm.reason,
       });
-      toast.fire({ icon: "success", title: "Kullanıcı başarıyla yasaklandı." });
+      toast.fire({ icon: "success", title: "Kullanıcıya başarılı bir şekilde ceza uygulandı." });
       setIsBanModalOpen(false);
       fetchUserDetails();
     } catch (error) {
@@ -128,18 +128,25 @@ const AdminUserDetail = () => {
     }
   };
 
-  const handleRemoveBan = async () => {
+  // 🎯 YENİ: SPESİFİK BİR CEZAYI KALDIRMA
+  const handleRemoveBan = async (penaltyType, penaltyName) => {
     const result = await cyberConfirm.fire({
-      title: "Yasağı Kaldır",
-      text: "Bu kullanıcının yasağını kaldırmak istediğinize emin misiniz?",
+      title: `${penaltyName} Kaldır`,
+      text: `Kullanıcının ${penaltyName} cezasını kaldırmak istediğinize emin misiniz?`,
       icon: "warning",
       confirmButtonText: "Evet, Yasağı Kaldır",
     });
 
     if (result.isConfirmed) {
       try {
-        await itemApi.banEntity({ target_type: "user", id: user.id, duration: "remove_ban", reason: "" });
-        toast.fire({ icon: "success", title: "Kullanıcının yasağı kaldırıldı." });
+        await itemApi.banEntity({
+          target_type: "user",
+          id: user.id,
+          duration: "remove_ban",
+          reason: "",
+          penalty_type: penaltyType, // Hangi cezanın kalkacağını backend'e söylüyoruz
+        });
+        toast.fire({ icon: "success", title: "Ceza başarıyla kaldırıldı." });
         fetchUserDetails();
       } catch (error) {
         toast.fire({ icon: "error", title: "Yasak kaldırılamadı." });
@@ -155,7 +162,13 @@ const AdminUserDetail = () => {
     );
   if (!user) return null;
 
-  const isBanned = user.banned_until || user.is_active === false;
+  // 🎯 YENİ: Hangi cezalara sahip olduğunu bulalım
+  const activeBans = [];
+  if (user.is_account_banned) activeBans.push({ type: "account", name: "Sisteme Giriş Yasağı", reason: user.account_ban_reason });
+  if (user.is_item_banned) activeBans.push({ type: "item_post", name: "İlan Ekleme Yasağı", reason: user.item_ban_reason });
+  if (user.is_message_banned) activeBans.push({ type: "messaging", name: "Mesajlaşma (Susturma)", reason: user.message_ban_reason });
+
+  const hasAnyBan = activeBans.length > 0;
 
   return (
     <div className="min-h-screen bg-slate-100 font-sans pb-20">
@@ -171,7 +184,7 @@ const AdminUserDetail = () => {
             <div>
               <h1 className="text-xl font-black text-slate-800 flex items-center gap-3">
                 Kullanıcı Profili: @{user.username}
-                {isBanned && (
+                {user.is_account_banned && (
                   <span className="bg-rose-100 text-rose-600 text-[10px] px-2.5 py-1 rounded-full font-black tracking-widest uppercase">
                     Yasaklı Hesap
                   </span>
@@ -214,7 +227,7 @@ const AdminUserDetail = () => {
             </div>
           </div>
 
-          {/* 2. CÜZDAN YÖNETİMİ (DEKONT MANTIĞI) */}
+          {/* 2. CÜZDAN YÖNETİMİ */}
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full blur-2xl pointer-events-none"></div>
             <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 relative z-10">
@@ -247,34 +260,49 @@ const AdminUserDetail = () => {
             </div>
           </div>
 
-          {/* 3. MODERASYON (YASAKLAMA) */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <span>🛡️</span> Moderasyon İşlemleri
-            </h3>
-
-            {isBanned ? (
-              <div className="bg-rose-50 p-4 rounded-xl border border-rose-100 h-full flex flex-col justify-center">
-                <div className="text-rose-600 font-bold text-sm mb-1">Hesap Yasaklı!</div>
-                <div className="text-xs text-rose-500/80 mb-4 line-clamp-2">"{user.ban_reason}"</div>
-                <button
-                  onClick={handleRemoveBan}
-                  className="w-full bg-white border border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white py-3 rounded-xl text-xs font-bold transition-colors active:scale-95 shadow-sm">
-                  Yasağı Kaldır
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col justify-center h-32">
-                <p className="text-xs text-slate-500 mb-4">
-                  Topluluk kurallarını ihlal eden bu kullanıcıyı sistemden uzaklaştırabilirsiniz.
-                </p>
+          {/* 3. GELİŞMİŞ MODERASYON */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <span>🛡️</span> Moderasyon (Cezalar)
+              </h3>
+              {hasAnyBan && (
                 <button
                   onClick={() => setIsBanModalOpen(true)}
-                  className="w-full bg-rose-50 hover:bg-rose-500 text-rose-600 hover:text-white border border-rose-200 hover:border-rose-500 py-3 rounded-xl text-xs font-bold transition-colors active:scale-95 shadow-sm">
-                  Kullanıcıyı Yasakla (Banla)
+                  className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-2 py-1 rounded transition-colors">
+                  + Yeni Ceza
                 </button>
-              </div>
-            )}
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1">
+              {hasAnyBan ? (
+                <div className="space-y-3">
+                  {activeBans.map((ban, index) => (
+                    <div key={index} className="bg-rose-50 p-3 rounded-xl border border-rose-100 flex flex-col gap-2">
+                      <div className="text-rose-600 font-bold text-[11px] uppercase">{ban.name}</div>
+                      <div className="text-xs text-rose-500/80 line-clamp-1 italic">"{ban.reason}"</div>
+                      <button
+                        onClick={() => handleRemoveBan(ban.type, ban.name)}
+                        className="w-full bg-white border border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white py-1.5 rounded-lg text-[10px] font-bold transition-colors shadow-sm mt-1">
+                        Yasağı Kaldır
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col justify-center h-full">
+                  <p className="text-xs text-slate-500 mb-4 text-center">
+                    Topluluk kurallarını ihlal eden bu kullanıcıya kısıtlama getirebilirsiniz.
+                  </p>
+                  <button
+                    onClick={() => setIsBanModalOpen(true)}
+                    className="w-full bg-rose-50 hover:bg-rose-500 text-rose-600 hover:text-white border border-rose-200 hover:border-rose-500 py-3 rounded-xl text-xs font-bold transition-colors active:scale-95 shadow-sm mt-auto">
+                    Kullanıcıya Ceza Ver
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -357,7 +385,7 @@ const AdminUserDetail = () => {
         </div>
       </div>
 
-      {/* 🎯 SÜRELİ / SÜRESİZ BAN MODALI */}
+      {/* 🎯 ÇOK KATMANLI BAN MODALI */}
       <AnimatePresence>
         {isBanModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -368,7 +396,7 @@ const AdminUserDetail = () => {
               className="bg-white shadow-2xl rounded-3xl w-full max-w-md overflow-hidden">
               <div className="bg-rose-50 border-b border-rose-100 p-6 flex justify-between items-center">
                 <h2 className="text-lg font-black text-rose-600 flex items-center gap-2">
-                  <span>🚨</span> Kullanıcıyı Yasakla
+                  <span>🚨</span> Kullanıcıya Ceza Ver
                 </h2>
                 <button onClick={() => setIsBanModalOpen(false)} className="text-rose-400 hover:text-rose-600 font-bold">
                   ✕
@@ -377,27 +405,39 @@ const AdminUserDetail = () => {
 
               <form onSubmit={handleBanSubmit} className="p-6 space-y-5">
                 <div className="space-y-2">
-                  <label className="text-[10px] uppercase font-bold text-slate-500">Yasaklama Süresi</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-500">Ceza Türü</label>
                   <select
-                    value={banForm.duration}
-                    onChange={(e) => setBanForm({ ...banForm, duration: e.target.value })}
-                    className="w-full bg-white border border-slate-200 focus:border-rose-500 text-slate-800 font-medium text-sm rounded-xl p-3 outline-none cursor-pointer">
-                    <option value="1_week">1 Hafta Ceza</option>
-                    <option value="1_month">1 Ay Ceza</option>
-                    <option value="permanent">Süresiz Kapatma (Kalıcı Ban)</option>
+                    value={banForm.penalty_type}
+                    onChange={(e) => setBanForm({ ...banForm, penalty_type: e.target.value })}
+                    className="w-full bg-white border border-slate-200 focus:border-rose-500 text-slate-800 font-bold text-sm rounded-xl p-3 outline-none cursor-pointer">
+                    <option value="account">Sisteme Giriş Yasağı (Hesap Kapatma)</option>
+                    <option value="item_post">İlan Ekleme Yasağı</option>
+                    <option value="messaging">Mesajlaşma Yasağı (Susturma)</option>
                   </select>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] uppercase font-bold text-slate-500">Kullanıcıya Gönderilecek Mesaj / Sebep</label>
+                  <label className="text-[10px] uppercase font-bold text-slate-500">Ceza Süresi</label>
+                  <select
+                    value={banForm.duration}
+                    onChange={(e) => setBanForm({ ...banForm, duration: e.target.value })}
+                    className="w-full bg-white border border-slate-200 focus:border-rose-500 text-slate-800 font-medium text-sm rounded-xl p-3 outline-none cursor-pointer">
+                    <option value="1_day">1 Gün</option>
+                    <option value="1_week">1 Hafta</option>
+                    <option value="1_month">1 Ay</option>
+                    <option value="permanent">Süresiz (Kalıcı Ceza)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase font-bold text-slate-500">Kullanıcıya İletilecek Sebep</label>
                   <textarea
                     rows="3"
                     required
-                    placeholder="Örn: Sahte ilan paylaştığınız tespit edilmiştir..."
+                    placeholder="Örn: Topluluk kurallarını ihlal eden mesajlar..."
                     value={banForm.reason}
                     onChange={(e) => setBanForm({ ...banForm, reason: e.target.value })}
                     className="w-full bg-white border border-slate-200 focus:border-rose-500 text-slate-800 font-medium text-sm rounded-xl p-3 outline-none resize-none"></textarea>
-                  <p className="text-[9px] text-slate-400">Bu mesaj kullanıcıya 'RentCircle Destek' bildirimi olarak iletilecektir.</p>
                 </div>
 
                 <div className="flex gap-3 pt-2">

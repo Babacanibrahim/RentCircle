@@ -2,8 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { authApi } from "../services/authApi";
-import { toast } from "../../../utils/alerts";
-// 🎯 YENİ: Modal animasyonları için
+import { toast, cyberConfirm } from "../../../utils/alerts";
 import { motion, AnimatePresence } from "framer-motion";
 
 const Login = () => {
@@ -16,7 +15,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
-  // 🎯 YENİ: 2FA State'leri
+  // 2FA State'leri
   const [is2FAModalOpen, setIs2FAModalOpen] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,7 +58,7 @@ const Login = () => {
       localStorage.setItem("refresh_token", data.refresh);
 
       toast.fire({ icon: "success", title: "Giriş başarılı! Yönlendiriliyorsunuz..." });
-      setIs2FAModalOpen(false); // Modal açıksa kapat
+      setIs2FAModalOpen(false);
 
       setTimeout(() => {
         let nextUrl = searchParams.get("next") || location.state?.from?.pathname || location.state?.from;
@@ -81,6 +80,33 @@ const Login = () => {
 
       const errData = err.response?.data;
 
+      // DRF veriyi bazen detail objesi içine sarabilir, her iki durumu da yakalıyoruz
+      const banInfo = errData?.is_banned ? errData : errData?.detail?.is_banned ? errData.detail : null;
+
+      // 🚨 SİSTEME GİRİŞ YASAĞI (HESAP BANI) KONTROLÜ
+      if (banInfo) {
+        return cyberConfirm.fire({
+          title: "🚫 Hesap Askıya Alındı",
+          html: `
+            <div style="text-align: left; font-size: 14px;">
+              <p style="color: #e11d48; font-weight: bold; margin-bottom: 10px;">${banInfo.error}</p>
+              <div style="background-color: #fff1f2; border: 1px solid #fecdd3; padding: 12px; border-radius: 8px; color: #be123c; font-style: italic; margin-bottom: 16px;">
+                 <strong>Ceza Sebebi:</strong> "${banInfo.reason}"
+              </div>
+              <p style="font-size: 12px; color: #64748b; line-height: 1.5;">
+                 Verilen kararda bir yanlışlık olduğunu düşünüyorsanız veya itirazda bulunmak istiyorsanız, detaylı bir açıklama ile birlikte 
+                 <a href="mailto:babacan-1907@outlook.com.tr" style="color: #3b82f6; font-weight: bold; text-decoration: underline;">babacan-1907@outlook.com.tr</a> 
+                 adresine e-posta gönderebilirsiniz.
+              </p>
+            </div>
+          `,
+          icon: "error",
+          confirmButtonText: "Anladım",
+          confirmButtonColor: "#e11d48",
+          showCancelButton: false,
+        });
+      }
+
       // 🛡️ SIFIR GÜVEN 2FA YAKALAMA: Backend benden 2FA Kodu istiyor!
       if (errData?.requires_2fa || errData?.detail?.requires_2fa) {
         setIs2FAModalOpen(true);
@@ -92,7 +118,7 @@ const Login = () => {
       let errMsg = "Giriş yapılamadı. Lütfen bilgilerinizi kontrol edin.";
       if (errData) {
         if (errData.detail === "No active account found with the given credentials") {
-          errMsg = "Şifre hatalı veya e-posta adresiniz henüz onaylanmamış olabilir.";
+          errMsg = "Şifre hatalı veya hesabınız sistem tarafından dondurulmuş olabilir.";
         } else if (errData.error) {
           errMsg = errData.error;
         } else if (typeof errData === "object" && !errData.requires_2fa) {
@@ -111,7 +137,6 @@ const Login = () => {
     executeLogin(payload);
   };
 
-  // 🎯 YENİ: 2FA Modal'ından tetiklenen 2. aşama gönderim
   const handle2FASubmit = (e) => {
     e.preventDefault();
     if (otpCode.length !== 6) {

@@ -337,8 +337,39 @@ const AdminDashboard = () => {
     }
   };
 
-  const getBannedUsers = () => users.filter((u) => u.banned_until || u.is_active === false);
-  const getBannedItems = () => items.filter((i) => i.is_banned);
+  // 🎯 YENİ: FİLTRELER ARTIK ÇALIŞIYOR
+  const getBannedUsers = () => {
+    let bannedList = users.filter((u) => u.is_account_banned || u.is_item_banned || u.is_message_banned);
+
+    if (bannedFilter === "permanent") {
+      return bannedList.filter((u) => u.is_account_permanent || u.is_item_permanent || u.is_message_permanent);
+    } else if (bannedFilter === "temporary") {
+      return bannedList.filter(
+        (u) =>
+          (u.is_account_banned && !u.is_account_permanent) ||
+          (u.is_item_banned && !u.is_item_permanent) ||
+          (u.is_message_banned && !u.is_message_permanent),
+      );
+    }
+    return bannedList;
+  };
+
+  const getBannedItems = () => {
+    let bannedList = items.filter((i) => i.is_banned);
+
+    if (bannedFilter === "permanent") {
+      return bannedList.filter((i) => {
+        if (!i.banned_until) return true;
+        return new Date(i.banned_until).getFullYear() > 2100;
+      });
+    } else if (bannedFilter === "temporary") {
+      return bannedList.filter((i) => {
+        if (!i.banned_until) return false;
+        return new Date(i.banned_until).getFullYear() < 2100;
+      });
+    }
+    return bannedList;
+  };
 
   if (isUnauthorized) return <NotFound />;
   if (loading)
@@ -924,14 +955,35 @@ const AdminDashboard = () => {
                   <tbody className="divide-y divide-slate-100">
                     {getBannedUsers().map((u) => (
                       <tr key={`user-${u.id}`} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4">
-                          <span className="bg-fuchsia-50 text-fuchsia-600 px-2 py-1 rounded text-[10px] font-black">KULLANICI</span>
+                        <td className="px-6 py-4 flex flex-col gap-1 items-start">
+                          {u.is_account_banned && (
+                            <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[9px] font-black w-max">HESAP BAN</span>
+                          )}
+                          {u.is_item_banned && (
+                            <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-[9px] font-black w-max">İLAN BAN</span>
+                          )}
+                          {u.is_message_banned && (
+                            <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[9px] font-black w-max">
+                              SOHBET BAN
+                            </span>
+                          )}
                         </td>
                         <td className="px-6 py-4 font-bold text-slate-700">@{u.username}</td>
-                        <td className="px-6 py-4 text-xs text-rose-500 font-medium">{u.ban_reason || "Sebep belirtilmemiş."}</td>
-                        <td className="px-6 py-4 font-mono text-xs">
-                          {!u.is_active ? "SÜRESİZ BAN" : new Date(u.banned_until).toLocaleDateString("tr-TR")}
+                        <td className="px-6 py-4 text-xs text-rose-500 font-medium">
+                          {u.account_ban_reason || u.item_ban_reason || u.message_ban_reason || "Sebep belirtilmemiş."}
                         </td>
+
+                        {/* 🎯 YENİ: Süreliyse Bitiş Tarihi, Süresizse SÜRESİZ yazar */}
+                        <td className="px-6 py-4 font-mono text-xs font-bold">
+                          {u.is_account_permanent || u.is_item_permanent || u.is_message_permanent ? (
+                            <span className="text-rose-600">SÜRESİZ</span>
+                          ) : (
+                            <span className="text-slate-600">
+                              {u.account_banned_until || u.item_banned_until || u.message_banned_until}
+                            </span>
+                          )}
+                        </td>
+
                         <td className="px-6 py-4 text-center">
                           <button
                             onClick={() => navigate(`/admin-dashboard/users/${u.id}`)}
@@ -944,13 +996,24 @@ const AdminDashboard = () => {
                     {getBannedItems().map((i) => (
                       <tr key={`item-${i.id}`} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4">
-                          <span className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded text-[10px] font-black">İLAN</span>
+                          <span className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded text-[10px] font-black">İLAN İPTALİ</span>
                         </td>
                         <td className="px-6 py-4 font-bold text-slate-700 truncate max-w-[200px]">{i.title}</td>
                         <td className="px-6 py-4 text-xs text-rose-500 font-medium">{i.ban_reason || "Kurallara aykırı içerik."}</td>
-                        <td className="px-6 py-4 font-mono text-xs">
-                          {i.banned_until ? new Date(i.banned_until).toLocaleDateString("tr-TR") : "Bilinmiyor"}
+
+                        {/* 🎯 YENİ: Yıl 2100'den büyükse SÜRESİZ yazısı basılır */}
+                        <td className="px-6 py-4 font-mono text-xs font-bold">
+                          {i.banned_until ? (
+                            new Date(i.banned_until).getFullYear() > 2100 ? (
+                              <span className="text-rose-600">SÜRESİZ</span>
+                            ) : (
+                              <span className="text-slate-600">{new Date(i.banned_until).toLocaleDateString("tr-TR")}</span>
+                            )
+                          ) : (
+                            <span className="text-rose-600">SÜRESİZ</span>
+                          )}
                         </td>
+
                         <td className="px-6 py-4 text-center">
                           <button
                             onClick={() => navigate(`/admin-dashboard/items/${i.id}`)}

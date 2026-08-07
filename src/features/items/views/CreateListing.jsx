@@ -103,6 +103,39 @@ const CreateListing = () => {
     longitude: "",
   });
 
+  // 🛡️ YENİ: SIFIR GECİKMELİ İLAN YASAĞI KONTROLÜ
+  useEffect(() => {
+    const checkBanStatus = async () => {
+      const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+      if (!token) {
+        toast.fire({ icon: "info", title: "Lütfen önce giriş yapın." });
+        navigate("/login");
+        return;
+      }
+
+      try {
+        // Doğrudan veritabanından güncel durumu çek (Eski tokena aldırış etme)
+        const res = await axios.get("http://localhost:8000/api/auth/me/", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.data.is_item_banned) {
+          toast.fire({
+            icon: "error",
+            title: "🚫 İlan Ekleme Yasağı",
+            text: `İlan ekleme yetkiniz ${res.data.item_ban_until_formatted} tarihine kadar kısıtlanmıştır. Sebep: ${res.data.item_ban_reason || "Belirtilmedi"}`,
+          });
+          navigate("/"); // Anında ana sayfaya fırlat
+        }
+      } catch (e) {
+        navigate("/login");
+      }
+    };
+
+    checkBanStatus();
+    itemApi.getCategories().then(setCategories).catch(console.error);
+  }, [navigate]);
+
   useEffect(() => {
     itemApi.getCategories().then(setCategories).catch(console.error);
   }, []);

@@ -4,6 +4,7 @@ import ItemCard from "../components/ItemCard";
 import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "../../../utils/alerts";
+import axios from "axios";
 
 const ItemDashboard = () => {
   const navigate = useNavigate();
@@ -23,6 +24,7 @@ const ItemDashboard = () => {
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
   const [availableOnly, setAvailableOnly] = useState(false);
+  const [currentUserBans, setCurrentUserBans] = useState({ is_item_banned: false, item_ban_reason: "", item_ban_until: "" });
 
   useEffect(() => {
     let isMounted = true;
@@ -58,6 +60,40 @@ const ItemDashboard = () => {
       isMounted = false;
     };
   }, [locationFilter, searchWord]);
+
+  // 🎯 YENİ: Token içinden İlan Yasağı durumunu oku
+  useEffect(() => {
+    const fetchBanStatus = async () => {
+      const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
+      if (token) {
+        try {
+          const res = await axios.get("http://localhost:8000/api/auth/me/", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          // 🎯 YENİ: Sadece değişiklik varsa State'i güncelle (React'in gereksiz yere ekranı yenilemesini engeller)
+          setCurrentUserBans((prev) => {
+            if (prev.is_item_banned === res.data.is_item_banned && prev.item_ban_until === res.data.item_ban_until_formatted) {
+              return prev; // Değişiklik yoksa hiçbir şey yapma
+            }
+            return {
+              is_item_banned: res.data.is_item_banned,
+              item_ban_reason: res.data.item_ban_reason,
+              item_ban_until: res.data.item_ban_until_formatted,
+            };
+          });
+        } catch (e) {}
+      }
+    };
+
+    fetchBanStatus(); // Sayfa açıldığında ilk kontrolü yap
+
+    // 🚀 SİHİRLİ DOKUNUŞ: Her 3 saniyede bir arka planda sessizce kontrol et.
+    // Admin ceza verdiği an, sayfa yenilenmeden ilan ver butonu kırmızıya döner!
+    const banInterval = setInterval(fetchBanStatus, 3000);
+
+    return () => clearInterval(banInterval); // Sayfadan çıkıldığında sayacı durdur
+  }, []);
 
   const handleCreateListingClick = () => {
     const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
@@ -118,11 +154,24 @@ const ItemDashboard = () => {
               ilanlar listeleniyor.
             </p>
           </div>
-          <button
-            onClick={handleCreateListingClick}
-            className="btn-gradient px-5 py-3 cursor-pointer hover:scale-[1.03] active:scale-95 transition-transform shadow-lg shadow-blue-500/20">
-            + Yeni İlan Ver
-          </button>
+          {/* YENİ: İlan Ver Butonu ve Ban Kontrolü */}
+          {currentUserBans.is_item_banned ? (
+            <div className="flex items-center gap-3 bg-rose-500/10 border border-rose-500/30 px-5 py-2.5 rounded-xl cursor-not-allowed">
+              <span className="text-xl">🚫</span>
+              <div className="flex flex-col text-left">
+                <span className="text-[10px] font-black text-rose-500 tracking-wider uppercase">
+                  İLAN YASAĞI (Bitiş: {currentUserBans.item_ban_until})
+                </span>
+                <span className="text-[9px] text-rose-400 italic">Sebep: "{currentUserBans.item_ban_reason}"</span>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleCreateListingClick}
+              className="btn-gradient px-5 py-3 cursor-pointer hover:scale-[1.03] active:scale-95 transition-transform shadow-lg shadow-blue-500/20">
+              + Yeni İlan Ver
+            </button>
+          )}
         </div>
 
         <div>
