@@ -5,7 +5,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (CustomTokenObtainPairView, RegisterView, ActivateAccountView, UserProfileView, LogoutViewSet, 
                     ChangePasswordView, ForgotPasswordRequestView, VerifyOTPView, ResetPasswordConfirmView,
                     WalletDetailView, RequestWithdrawalView, InitiateDepositView, deposit_callback,
-                    Setup2FAView, Verify2FAView, Disable2FAView)
+                    Setup2FAView, Verify2FAView, Disable2FAView, ContactMessageView)
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='auth_register'),
@@ -33,4 +33,6 @@ urlpatterns = [
     path('2fa/setup/', Setup2FAView.as_view(), name='2fa_setup'),
     path('2fa/verify/', Verify2FAView.as_view(), name='2fa_verify'),
     path('2fa/disable/', Disable2FAView.as_view(), name='2fa_disable'),
+
+    path('contact/', ContactMessageView.as_view(), name='contact_message'),
 ]

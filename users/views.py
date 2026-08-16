@@ -16,7 +16,7 @@ from rest_framework.permissions import AllowAny
 from django.http import HttpResponseRedirect
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.decorators import api_view, permission_classes
@@ -28,8 +28,10 @@ import uuid
 from django.shortcuts import redirect
 from django.contrib.auth import get_user_model
 
-from .serializers import RegisterSerializer, UserProfileSerializer, ChangePasswordSerializer, WalletSerializer, CustomTokenObtainPairSerializer
-from .models import CustomUser, PasswordResetOTP, Wallet, WalletTransaction, WithdrawalRequest
+from .serializers import (RegisterSerializer, UserProfileSerializer, ChangePasswordSerializer, 
+                          WalletSerializer, CustomTokenObtainPairSerializer,
+                          ContactMessageSerializer)
+from .models import CustomUser, PasswordResetOTP, Wallet, WalletTransaction, WithdrawalRequest, ContactMessage
 
 User = get_user_model()
 
@@ -580,3 +582,28 @@ class Disable2FAView(APIView):
             return Response({"message": "İki Aşamalı Doğrulama (2FA) başarıyla devre dışı bırakıldı."}, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Geçersiz veya süresi dolmuş kod! İptal işlemi reddedildi."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ContactMessageView(generics.CreateAPIView):
+    queryset = ContactMessage.objects.all()
+    serializer_class = ContactMessageSerializer
+    permission_classes = [AllowAny] # Ziyaretçiler de mesaj gönderebilsin
+
+    def perform_create(self, serializer):
+        # Önce mesajı veritabanına kaydet
+        contact_msg = serializer.save()
+        
+        # Sana e-posta olarak gönder
+        subject = f"RentCircle İletişim: {contact_msg.subject}"
+        message = f"Gönderen: {contact_msg.name} ({contact_msg.email})\nKonu: {contact_msg.subject}\n\nMesaj:\n{contact_msg.message}"
+        
+        try:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=['babacan-1907@outlook.com.tr'],
+                fail_silently=True, # Hata olursa API çökmesin, sadece veritabanına kaydetmekle yetinsin
+            )
+        except Exception as e:
+            print(f"İletişim formu mail gönderme hatası: {e}")

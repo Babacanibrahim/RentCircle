@@ -100,3 +100,15 @@ class WithdrawalRequest(models.Model):
 def create_user_wallet(sender, instance, created, **kwargs):
     if created:
         Wallet.objects.create(user=instance)
+
+
+class ContactMessage(models.Model):
+    name = models.CharField(max_length=150, verbose_name="Gönderen Adı")
+    email = models.EmailField(verbose_name="E-Posta")
+    subject = models.CharField(max_length=200, verbose_name="Konu")
+    message = models.TextField(verbose_name="Mesaj")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Gönderilme Tarihi")
+    is_read = models.BooleanField(default=False, verbose_name="Okundu mu?")
+
+    def __str__(self):
+        return f"[{self.subject}] {self.name} - {self.email}"

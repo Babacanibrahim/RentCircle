@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import CustomUser, Wallet, WalletTransaction, WithdrawalRequest
+from .models import CustomUser, Wallet, WalletTransaction, WithdrawalRequest, ContactMessage
 from django.contrib.auth import get_user_model
 from datetime import date
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -240,3 +240,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['message_ban_reason'] = getattr(user, 'message_ban_reason', None) if is_message_banned else None
         
         return token
+
+class ContactMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactMessage
+        fields = ['id', 'name', 'email', 'subject', 'message', 'created_at']
