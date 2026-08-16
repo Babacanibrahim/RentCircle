@@ -48,6 +48,11 @@ export const authApi = {
         return response.data;
     },
 
+    contactMessage: async (messageData) => {
+        const response = await axiosInstance.post('auth/contact/', messageData);
+        return response.data;
+    },
+
     // --- 2FA İŞLEMLERİ ---
     setup2FA: async () => {
         const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");

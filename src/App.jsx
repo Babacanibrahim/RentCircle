@@ -9,6 +9,10 @@ import PrivateRoute from "./features/components/PrivateRoute";
 import MainLayout from "./features/components/MainLayout";
 
 // Uygulama İçi Sayfalar
+import FAQ from "./features/public/FAQ";
+import Contact from "./features/public/Contact";
+import HowItWorks from "./features/public/HowItWorks";
+import Terms from "./features/public/Terms";
 import AdminDashboard from "../src/features/admin/views/AdminDashboard";
 import ItemDashboard from "./features/items/views/ItemDashboard";
 import ItemDetail from "./features/items/views/ItemDetail";
@@ -92,6 +96,12 @@ function App() {
           <Route path="/dashboard" element={<ItemDashboard />} />
           <Route path="/listings/:id" element={<ItemDetail />} />
           <Route path="/stores/:id" element={<StoreDetail />} /> {/* Bulanık ekran (Login Wall) çıkacak */}
+
+          <Route path="/faq" element={<FAQ />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/how-it-works" element={<HowItWorks />} />
+          <Route path="/terms" element={<Terms />} />
+          
           {/* 🔴 SADECE ÜYELERE AÇIK SAYFALAR */}
           <Route
             path="/profile"
