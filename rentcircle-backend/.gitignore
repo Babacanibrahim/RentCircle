@@ -1,0 +1,25 @@
+# Sanal Ortam
+venv/
+.venv/
+env/
+.env
+.env.local
+
+# Python / Django cache ve log dosyaları
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+db.sqlite3
+*.log
+
+# VS Code / Editör ayarları
+.vscode/
+.idea/
+
+# Medya Yüklemeleri (Kullanıcı Dosyaları)
+media/
+media/*
