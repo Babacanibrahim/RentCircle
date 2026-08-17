@@ -87,7 +87,8 @@ Yöneticiler kullanıcılar üzerinde İlan Yasağı, Mesajlaşma Yasağı, Geç
 
 ### 2. İlan Detayları ve Rezervasyon
 
-![İlan Detayları ve Rezervasyon](docs/images/rent.png)
+![İlan Detayları](docs/images/detail.png)
+![Rezervasyon İşlemi](docs/images/rent.png)
 
 ### 3. Gerçek Zamanlı Sohbet ve Pazarlık
 
