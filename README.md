@@ -1,10 +1,10 @@
-# 🔄 RentCircle
+# 🔄 RentCircle - Güvenli Eşya Kiralama ve Paylaşım Platformu
 
 📌 **Proje Hakkında**
 
-RentCircle, kullanıcıların sahip oldukları eşyaları kiraya verebildiği veya ihtiyaç duydukları eşyaları diğer kullanıcılardan kiralayabildiği, güvenlik odaklı bir **Peer-to-Peer (P2P) eşya kiralama ve paylaşım platformudur.**
+RentCircle, kullanıcıların sahip oldukları eşyaları kiraya verebildiği veya ihtiyaç duydukları eşyaları diğer kullanıcılardan kiralayabildiği, üst düzey güvenlik odaklı bir Peer-to-Peer (P2P) eşya kiralama ve paylaşım platformudur.
 
-Platform; kullanıcı yönetimi, ilan oluşturma, rezervasyon, güvenli ödeme, dijital cüzdan, gerçek zamanlı mesajlaşma, fiyat pazarlığı, konum paylaşımı ve çok katmanlı moderasyon mekanizmalarını tek bir ekosistem altında birleştirir.
+Platform; ilan yönetimi, interaktif rezervasyon, güvenli havuz ödeme sistemi, dijital cüzdan, gerçek zamanlı mesajlaşma, fiyat pazarlığı, harita üzerinden konum paylaşımı, kullanıcı değerlendirme ve çok katmanlı moderasyon mekanizmalarını tek bir ekosistem altında birleştirir.
 
 ---
 
@@ -14,36 +14,42 @@ Platform; kullanıcı yönetimi, ilan oluşturma, rezervasyon, güvenli ödeme, 
 
 RentCircle'da ödeme süreci doğrudan satıcıya para gönderme mantığıyla çalışmaz. Ödeme akışı, marketplace yapısına uygun şekilde **iyzico altyapısı** üzerinden gerçekleştirilir.
 
-Platform ayrıca kullanıcıların kazançlarını yönetebildiği bir **dijital cüzdan sistemi** sunar.
+Platform ayrıca kullanıcıların kazançlarını yönetebildiği kapsamlı bir dijital cüzdan sistemi sunar.
 
 ### ⚡ Gerçek Zamanlı Sohbet ve Pazarlık
 
-RentCircle, gerçek zamanlı iletişim için `Django Channels`, `WebSocket`, `ASGI` ve `Redis` teknolojilerini kullanır.
+`Django Channels`, `WebSocket`, `ASGI` ve `Redis` teknolojileriyle donatılmış canlı mesajlaşma altyapısı sayesinde kullanıcılar:
 
-Kullanıcılar:
+- Gecikmesiz (Real-time) mesajlaşabilir.
+- Kiralama fiyatı için özel teklif (Offer) gönderebilir ve yönetebilir.
+- Sohbet içerisinden anlık konum (Harita Pini) paylaşabilir ve buluşma noktası belirleyebilir.
 
-- Anlık mesajlaşabilir.
-- Kiralama fiyatı için teklif verebilir.
-- Gelen teklifleri kabul veya reddedebilir.
-- Buluşma noktası paylaşabilir.
+### 📍 Harita ve Konum Entegrasyonu
 
-### 🔑 İki Faktörlü Kimlik Doğrulama (2FA)
+Kullanıcılar sisteme ürün eklerken eşyanın bulunduğu konumu harita üzerinden seçebilir. Kiralama sürecinde kiracı ve eşya sahibi, OpenStreetMap ve React Leaflet altyapısıyla teslimat noktalarını doğrudan platform üzerinden şeffafça belirler.
 
-Hassas finansal işlemler ek güvenlik katmanı ile korunmaktadır.
+### 🔎 Gelişmiş Arama ve Kapsamlı Filtreleme
 
-Özellikle cüzdandan para çekme işlemlerinde kullanıcıdan **TOTP tabanlı 2FA** kodu istenir. Google Authenticator gibi uygulamalar kullanılarak oluşturulan doğrulama kodu girilmeden finansal işlem yapılamaz.
+İhtiyaç duyulan ürüne en hızlı şekilde ulaşmak için dinamik filtreleme motoru geliştirilmiştir:
+
+- Anahtar kelimeye göre arama
+- Kategori bazlı listeleme
+- Şehir ve İlçe bazlı konum filtreleme
+- Minimum ve Maksimum Fiyat aralığı
+- İlanın güncel aktiflik/müsaitlik durumu
+
+### ⭐ Değerlendirme, Destek ve Ticket Sistemi
+
+- **Puanlama ve Yorum (Review):** Kiralama işlemi tamamlandıktan sonra kullanıcılar birbirlerini puanlayabilir ve deneyimlerini yorumlayarak platform güvenilirliğini artırır.
+- **Destek ve Şikayet (Ticket):** Kullanıcılar karşılaştıkları sorunlar, şikayetler veya ilan itirazları için sistem üzerinden doğrudan yöneticilere "Destek Bileti" oluşturabilir.
+
+### 🔑 Kimlik Doğrulama, 2FA ve Hesap Yönetimi
+
+Gelişmiş "Auth" işlemleri sayesinde kullanıcılar profil bilgilerini güncelleyebilir ve şifre değiştirme işlemlerini güvenle yapabilir. Hassas finansal işlemler (Örn: Cüzdandan IBAN'a para çekme) **TOTP tabanlı 2FA (Google Authenticator)** kodu girilmeden kesinlikle gerçekleştirilemez.
 
 ### 🛡️ Çok Katmanlı Moderasyon ve Ceza Sistemi
 
-Yöneticiler kullanıcılar üzerinde **İlan Yasağı**, **Mesajlaşma Yasağı**, **Geçici/Süresiz Hesap Banı** gibi kısıtlamalar uygulayabilir.
-
-Ayrıca **Silent Polling** mekanizması sayesinde uygulamada aktif olan kullanıcıların yeni kısıtlamaları sayfayı tamamen yenilemeden algılaması sağlanır.
-
-### 📅 Rezervasyon ve Kiralama Yönetimi
-
-Kullanıcılar ilan detay sayfasındaki interaktif takvim üzerinden kiralama tarihlerini seçebilir.
-
-Sistem seçilen tarihlere göre kiralama ücretini ve **%15 depozito tutarını** otomatik hesaplar.
+Yöneticiler kullanıcılar üzerinde İlan Yasağı, Mesajlaşma Yasağı, Geçici veya Süresiz Hesap Banı gibi kısıtlamalar uygulayabilir. **Silent Polling** mekanizması sayesinde, ceza alan aktif kullanıcıların ekranlarındaki kısıtlamalar sayfayı yenilemeye dahi gerek kalmadan anında devreye girer.
 
 ---
 
@@ -77,15 +83,35 @@ Sistem seçilen tarihlere göre kiralama ücretini ve **%15 depozito tutarını*
 
 ### 1. Ana Vitrin ve Gelişmiş Arama
 
+![Ana Vitrin](docs/images/dashboard.png)
+
 ### 2. İlan Detayları ve Rezervasyon
+
+![İlan Detayları ve Rezervasyon](docs/images/rent.png)
 
 ### 3. Gerçek Zamanlı Sohbet ve Pazarlık
 
-### 4. Cüzdan ve 2FA
+![Gerçek Zamanlı Sohbet](docs/images/chat.png)
 
-### 5. Admin ve Moderasyon Paneli
+### 4. Profil Güvenlik - 2FA ve Şifre Değiştirme
 
-> **Not:** Proje kapak görseli için `docs/images/0_banner.png` dosyasına göz atabilirsiniz.
+![Profil Güvenlik - 2FA ve Şifre Değiştirme](docs/images/2fa.png)
+
+### 5. Admin - Loglar
+
+![Admin Loglar](docs/images/admin_logs.png)
+
+### 6. Ürün Ekleme
+
+![Ürün Ekleme](docs/images/create_item.png)
+
+### 7. Destek Biletleri (Tickets)
+
+![Destek Biletleri](docs/images/tickets.png)
+
+### 8. Cüzdan Geçmişi
+
+![Cüzdan Geçmişi](docs/images/wallet.png)
 
 ---
 
@@ -99,17 +125,18 @@ Sistem seçilen tarihlere göre kiralama ücretini ve **%15 depozito tutarını*
 | **Django 5.x**              | Web framework                              |
 | **Django REST Framework**   | REST API Mimarisi                          |
 | **Django Channels & Redis** | WebSocket & Gerçek zamanlı iletişim        |
-| **SimpleJWT & PyOTP**       | Token Rotation & TOTP 2FA kimlik doğrulama |
+| **SimpleJWT & PyOTP**       | Token Rotation & TOTP 2FA Kimlik doğrulama |
 | **iyzico API**              | Ödeme altyapısı                            |
 
 ### Frontend
 
-| **Teknoloji**                    | **Kullanım Alanı**                    |
-| -------------------------------- | ------------------------------------- |
-| **React (Vite)**                 | Kullanıcı arayüzü ve build altyapısı  |
-| **Tailwind CSS & Framer Motion** | Arayüz tasarımı ve animasyonlar       |
-| **Axios**                        | HTTP istemcisi (Interceptor destekli) |
-| **React Leaflet & OSM**          | Harita ve konum entegrasyonu          |
+| **Teknoloji**                    | **Kullanım Alanı**                              |
+| -------------------------------- | ----------------------------------------------- |
+| **React (Vite)**                 | Kullanıcı arayüzü ve Build altyapısı            |
+| **React Router v6**              | Sayfa yönlendirmeleri ve Korunan Route'lar      |
+| **Tailwind CSS & Framer Motion** | Arayüz tasarımı ve Animasyonlar                 |
+| **Axios**                        | HTTP istemcisi (Sessiz Yenileme ve Interceptor) |
+| **React Leaflet & OSM**          | Harita ve konum entegrasyonu                    |
 
 ---
 
@@ -119,20 +146,18 @@ Güvenlik, RentCircle'ın temel tasarım prensiplerinden biridir.
 
 **Güvenlik Bileşenleri:**
 
-- JWT Authentication ve Token Rotation (Sessiz Yenileme)
-- Permission tabanlı API erişimi
+- **Protected Routes (Korunan Route'lar):** Yetkisiz kullanıcıların URL üzerinden manuel sayfa erişimleri React seviyesinde engellenmiştir.
+- JWT Authentication ve Token Rotation (Çalınan tokenlara karşı rotasyon)
+- Permission tabanlı API erişimi ve Business Logic doğrulama
 - TOTP tabanlı 2FA (Para çekme koruması)
-- Dosya güvenlik kontrolleri (Magic Bytes analizi)
-- Kullanıcı kısıtlama (Ban/Mute) sistemi
-- Çok katmanlı URL ve erişim (Route Guarding) koruması
+- Dosya güvenlik kontrolleri (Magic Bytes DNA analizi)
+- Çok katmanlı URL, Route Guarding ve Backend API zırhlaması
 
 ---
 
 ## 📁 Proje Yapısı
 
-RentCircle, backend ve frontend uygulamalarını tek bir repository altında barındıran bir **monorepo** olarak yapılandırılmıştır.
-
-Önceden bağımsız olan projeler, geçmiş commit kayıtları korunarak **Git Subtree** ile birleştirilmiştir.
+RentCircle, backend ve frontend uygulamalarını tek bir repository altında barındıran bir monorepo olarak yapılandırılmıştır. Önceden bağımsız olan projeler, geçmiş commit kayıtları (history) korunarak **Git Subtree** ile başarıyla birleştirilmiştir.
 
 ```text
 RentCircle/
@@ -151,7 +176,7 @@ RentCircle/
 
 - Python 3.12+
 - Node.js 20+
-- Redis Server (WebSocket için aktif olmalıdır)
+- Redis Server (WebSocket iletişiminin çalışması için aktif olmalıdır)
 
 ### 1. Repository'yi Klonlayın
 
@@ -175,7 +200,7 @@ source venv/bin/activate
 # Bağımlılıkları yükleyin
 pip install -r requirements.txt
 
-# .env dosyasını oluşturun
+# .env dosyasını oluşturun (İçini kendi servis bilgilerinizle doldurun)
 copy .env.example .env
 
 # Veritabanını oluşturun ve sunucuyu başlatın
@@ -192,29 +217,19 @@ cd rentcircle-frontend
 
 npm install
 
-# .env dosyasını oluşturun
+# .env dosyasını oluşturun (İçini API adreslerinizle doldurun)
 copy .env.example .env
 
 npm run dev
 ```
 
-> **🔑 Önemli Not:** Projenin çalışabilmesi için `.env` dosyalarındaki gizli anahtarları (Redis URL, iyzico Key, SMTP bilgileri vb.) kendi servislerinizden alarak doldurmanız gerekmektedir. Bu dosyaları asla GitHub'a göndermeyin.
-
----
-
-## 🗺️ Yol Haritası (Gelecek Hedefleri)
-
-- [ ] Kullanıcılar arası puanlama ve yorum (Rating/Review) sistemi
-- [ ] Google ve GitHub hesapları ile tek tıkla giriş (OAuth)
-- [ ] Kategori ve lokasyon bazlı gelişmiş öneri algoritması
-- [ ] "Şifremi Unuttum" ve "E-Posta Doğrulama" akışlarının eklenmesi
-- [ ] Admin panelinde gelişmiş grafiksel analiz (Analytics) raporları
+> **🔑 Önemli Not:** Projenin sorunsuz çalışabilmesi için `.env` dosyaları içerisindeki gizli anahtarları (Redis URL, iyzico Key, SMTP mail bilgileri vb.) kendi servislerinizden alarak doldurmanız gerekmektedir. Bu dosyalar `.gitignore` ile korunmaktadır ve asla GitHub'a yüklenmemelidir.
 
 ---
 
 ## 📄 Lisans
 
-Bu proje **MIT License** altında lisanslanmıştır. Detaylar için `LICENSE` dosyasını inceleyebilirsiniz.
+Bu proje **MIT License** altında lisanslanmıştır. Dilediğiniz gibi inceleyebilir ve geliştirebilirsiniz. Kaynak kodların ticari veya kişisel kullanımı serbesttir.
 
 ---
 
