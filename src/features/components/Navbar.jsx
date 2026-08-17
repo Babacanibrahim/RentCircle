@@ -91,7 +91,8 @@ const Navbar = ({ onLocationFilter }) => {
         setCurrentUserId(userId);
 
         axios
-          .get("http://localhost:8000/api/auth/me/", {
+          .get(`${import.meta.env.VITE_API_BASE_URL}/auth/me/`, {
+            // 🎯 YENİ
             headers: { Authorization: `Bearer ${token}` },
           })
           .then((response) => {
@@ -129,12 +130,10 @@ const Navbar = ({ onLocationFilter }) => {
 
         // 2. 🎯 Otomatik yeniden bağlanan WebSocket Fonksiyonu
         const connectWebSocket = () => {
-          const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications/${userId}/`);
+          const ws = new WebSocket(`${import.meta.env.VITE_WS_BASE_URL}/notifications/${userId}/`);
           wsRef.current = ws;
 
           ws.onopen = () => {
-            console.log("🌐 Global Bildirim Tüneli Açıldı.");
-            // Tünel uykuya dalmasın diye 30 saniyede bir ping atıyoruz
             pingInterval = setInterval(() => {
               if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: "ping" }));
@@ -177,7 +176,6 @@ const Navbar = ({ onLocationFilter }) => {
           };
 
           ws.onclose = () => {
-            console.log("🔴 Bildirim Tüneli Kapandı. 3 Saniye içinde tekrar bağlanıyor...");
             clearInterval(pingInterval); // Eski zamanlayıcıyı durdur
             // Bağlantı koparsa 3 saniye sonra otomatik tekrar bağlan
             setTimeout(connectWebSocket, 3000);
@@ -277,11 +275,9 @@ const Navbar = ({ onLocationFilter }) => {
     if (result.isConfirmed) {
       try {
         const refreshToken = localStorage.getItem("refresh_token") || sessionStorage.getItem("refresh_token");
-        console.log("🔍 [FRONTEND TEST] Backend'e gönderilen Token:", refreshToken);
 
         if (refreshToken) {
           const response = await authApi.logout(refreshToken);
-          console.log("✅ [FRONTEND TEST] Backend Cevabı:", response);
         }
       } catch (error) {
         console.error("❌ [FRONTEND TEST HATASI] Backend'e ulaşılamadı:", error);

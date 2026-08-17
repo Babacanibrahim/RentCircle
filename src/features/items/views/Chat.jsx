@@ -185,7 +185,8 @@ const Chat = () => {
           const payload = JSON.parse(window.atob(base64));
           setCurrentUserId(String(payload.user_id).toLowerCase());
 
-          const res = await axios.get("http://localhost:8000/api/auth/me/", {
+          const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/auth/me/`, {
+            // 🎯 YENİ
             headers: { Authorization: `Bearer ${token}` },
           });
 
@@ -275,12 +276,10 @@ const Chat = () => {
     const connectWebSocket = () => {
       if (!activeChat || activeChat.isNew) return;
 
-      const ws = new WebSocket(`ws://127.0.0.1:8000/ws/chat/${activeChat.id}/`);
+      const ws = new WebSocket(`${import.meta.env.VITE_WS_BASE_URL}/chat/${activeChat.id}/`); // 🎯 YENİ
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log(`Oda ${activeChat.id} için gerçek zamanlı bağlantı kuruldu.`);
-
         pingInterval = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "ping" }));
@@ -332,7 +331,6 @@ const Chat = () => {
       };
 
       ws.onclose = () => {
-        console.log("WebSocket bağlantısı sonlandı. 3 Saniye içinde tekrar deneniyor...");
         clearInterval(pingInterval);
         clearInterval(statusCheckInterval);
         if (isSubscribed) {

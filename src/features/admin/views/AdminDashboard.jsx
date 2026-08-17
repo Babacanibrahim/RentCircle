@@ -106,7 +106,7 @@ const AdminDashboard = () => {
     let pingInterval;
 
     const connectWebSocket = () => {
-      const ws = new WebSocket(`ws://127.0.0.1:8000/ws/admin-feed/`);
+      const ws = new WebSocket(`${import.meta.env.VITE_WS_BASE_URL}/admin-feed/`); // 🎯 YENİ
       wsRef.current = ws;
 
       ws.onopen = () => {

@@ -2,7 +2,7 @@ import axios from 'axios';
 import { toast } from '../utils/alerts';
 
 const axiosInstance = axios.create({
-    baseURL: 'http://localhost:8000/api/',
+    baseURL: import.meta.env.VITE_API_BASE_URL + '/', // 🎯 YENİ
     headers: {
         'Content-Type': 'application/json',
     }
@@ -42,7 +42,7 @@ axiosInstance.interceptors.response.use(
     
     if (refreshToken) {
         // 1. Arka planda yeni token'ları iste
-        const response = await axios.post('http://localhost:8000/api/auth/refresh/', {
+        const response = await axios.post(`${import.meta.env.VITE_API_BASE_URL}/auth/refresh/`, { // 🎯 YENİ
             refresh: refreshToken
         });
 

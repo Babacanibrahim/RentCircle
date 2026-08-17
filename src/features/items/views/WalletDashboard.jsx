@@ -52,7 +52,7 @@ const WalletDashboard = () => {
         const userId = String(payload.user_id).toLowerCase();
 
         const connectWebSocket = () => {
-          const ws = new WebSocket(`ws://127.0.0.1:8000/ws/notifications/${userId}/`);
+          const ws = new WebSocket(`${import.meta.env.VITE_WS_BASE_URL}/notifications/${userId}/`); // 🎯 YENİ
           wsRef.current = ws;
 
           ws.onopen = () => {

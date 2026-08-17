@@ -115,7 +115,8 @@ const CreateListing = () => {
 
       try {
         // Doğrudan veritabanından güncel durumu çek (Eski tokena aldırış etme)
-        const res = await axios.get("http://localhost:8000/api/auth/me/", {
+        const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/auth/me/`, {
+          // 🎯 YENİ
           headers: { Authorization: `Bearer ${token}` },
         });
 
